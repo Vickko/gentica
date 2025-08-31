@@ -1,6 +1,3 @@
-# Chat files
-chat.go
-
 # Config files (keep sample, ignore actual config)
 config/config.yaml
 
