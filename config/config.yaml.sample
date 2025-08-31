@@ -1,0 +1,16 @@
+# LLM Configuration
+llm:
+  # API key for the LLM service (required)
+  api_key: "your-api-key-here"
+  
+  # Base URL for the LLM API endpoint (optional, defaults to OpenAI)
+  base_url: "https://api.openai.com/v1"
+  
+  # Model to use for chat completions (required)
+  model: "gpt-3.5-turbo"
+  
+  # Maximum tokens for responses (optional, 0 = use model default)
+  # max_tokens: 2048
+  
+  # Temperature for response randomness (optional, 0.0-2.0, 0 = use model default)
+  # temperature: 0.7
