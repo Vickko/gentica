@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // readFile 读取指定文件的指定行范围
@@ -76,4 +77,42 @@ func readAllLines(path string) ([]string, error) {
 	}
 
 	return lines, nil
+}
+
+// ReadFile 读取指定文件的指定行范围，支持显示行号
+// path: 文件路径
+// startLine: 起始行号（包含，从1开始）
+// endLine: 结束行号（不包含，从1开始）
+// showLineNumbers: 是否显示行号
+// 当 startLine=endLine=0 时，读取全部文件
+func ReadFile(path string, startLine, endLine int, showLineNumbers bool) ([]string, error) {
+	lines, err := readFile(path, startLine, endLine)
+	if err != nil {
+		return nil, err
+	}
+
+	if !showLineNumbers {
+		return lines, nil
+	}
+
+	// 计算行号格式
+	totalLines := len(lines)
+	actualStartLine := 1
+	if startLine > 0 {
+		actualStartLine = startLine
+	}
+
+	// 计算最大行号的宽度用于对齐
+	maxLineNum := actualStartLine + totalLines - 1
+	width := len(strconv.Itoa(maxLineNum))
+
+	// 添加行号
+	var numberedLines []string
+	for i, line := range lines {
+		lineNum := actualStartLine + i
+		numberedLine := fmt.Sprintf("%*d\t%s", width, lineNum, line)
+		numberedLines = append(numberedLines, numberedLine)
+	}
+
+	return numberedLines, nil
 }

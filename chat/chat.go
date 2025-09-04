@@ -36,14 +36,85 @@ type Config struct {
 // FunctionHandler represents a function that can be called by the LLM
 type FunctionHandler func(args map[string]interface{}) (string, error)
 
+// Function represents a self-describing function with both definition and handler
+type Function struct {
+	Definition openai.FunctionDefinition
+	Handler    FunctionHandler
+}
+
+// FunctionRegistry manages registered functions
+type FunctionRegistry struct {
+	functions map[string]*Function
+	mutex     sync.RWMutex
+}
+
+// NewFunctionRegistry creates a new function registry
+func NewFunctionRegistry() *FunctionRegistry {
+	return &FunctionRegistry{
+		functions: make(map[string]*Function),
+	}
+}
+
+// Register adds a function to the registry
+func (r *FunctionRegistry) Register(fn *Function) {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.functions[fn.Definition.Name] = fn
+}
+
+// Execute runs a registered function by name
+func (r *FunctionRegistry) Execute(name string, arguments string) (string, error) {
+	r.mutex.RLock()
+	fn, exists := r.functions[name]
+	r.mutex.RUnlock()
+	
+	if !exists {
+		return "", fmt.Errorf("function %s not found", name)
+	}
+	
+	// Parse arguments
+	var args map[string]interface{}
+	if arguments != "" {
+		err := json.Unmarshal([]byte(arguments), &args)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse function arguments: %v", err)
+		}
+	}
+	
+	return fn.Handler(args)
+}
+
+// GetTools returns all registered functions as OpenAI tools
+func (r *FunctionRegistry) GetTools() []openai.Tool {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	
+	tools := make([]openai.Tool, 0, len(r.functions))
+	for _, fn := range r.functions {
+		tools = append(tools, openai.Tool{
+			Type:     openai.ToolTypeFunction,
+			Function: &fn.Definition,
+		})
+	}
+	
+	return tools
+}
+
+// GetFunction returns a specific function by name
+func (r *FunctionRegistry) GetFunction(name string) (*Function, bool) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	fn, exists := r.functions[name]
+	return fn, exists
+}
+
 // Package-level variables for storing chat history and OpenAI client
 var (
 	chatHistory      []Message
 	historyMux       sync.RWMutex
 	config           Config
 	client           *openai.Client
-	functionHandlers map[string]FunctionHandler
-	functionMux      sync.RWMutex
+	functionRegistry *FunctionRegistry
 )
 
 // LoadConfig loads configuration from YAML file
@@ -205,7 +276,7 @@ func SendChatMessageWithTools(userMessage string, tools []openai.Tool) (string, 
 		// Execute tool calls
 		for _, toolCall := range choice.Message.ToolCalls {
 			if toolCall.Function.Name != "" {
-				result, err := ExecuteFunction(toolCall.Function.Name, toolCall.Function.Arguments)
+				result, err := functionRegistry.Execute(toolCall.Function.Name, toolCall.Function.Arguments)
 				if err != nil {
 					result = fmt.Sprintf("Error executing function: %v", err)
 				}
@@ -256,8 +327,17 @@ func InitializeChat() error {
 	// Initialize chat history
 	chatHistory = make([]Message, 0)
 
+	// Initialize function registry
+	functionRegistry = NewFunctionRegistry()
+
 	// Register built-in functions
-	RegisterFunction("get_current_time", GetCurrentTime)
+	RegisterFunction(NewGetCurrentTimeFunction())
+	
+	// Register tools functions
+	RegisterFunction(NewReadFileFunction())
+	RegisterFunction(NewSearchInDirectoryFunction())
+	RegisterFunction(NewEditFileFunction())
+	RegisterFunction(NewListFilesFunction())
 
 	return nil
 }
@@ -285,73 +365,50 @@ func GetChatStats() map[string]int {
 	return stats
 }
 
-// RegisterFunction registers a function handler
-func RegisterFunction(name string, handler FunctionHandler) {
-	functionMux.Lock()
-	defer functionMux.Unlock()
-
-	if functionHandlers == nil {
-		functionHandlers = make(map[string]FunctionHandler)
-	}
-	functionHandlers[name] = handler
+// RegisterFunction registers a self-describing function
+func RegisterFunction(fn *Function) {
+	functionRegistry.Register(fn)
 }
 
-// GetCurrentTime returns the current time in a formatted string
-func GetCurrentTime(args map[string]interface{}) (string, error) {
-	now := time.Now()
-	format := "2006-01-02 15:04:05"
-
-	// Check if a specific format is requested
-	if f, ok := args["format"]; ok {
-		if formatStr, ok := f.(string); ok {
-			format = formatStr
-		}
-	}
-
-	return fmt.Sprintf("Current time: %s", now.Format(format)), nil
-}
-
-// GetAvailableTools returns the available tools for function calling
-func GetAvailableTools() []openai.Tool {
-	return []openai.Tool{
-		{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        "get_current_time",
-				Description: "Get the current date and time",
-				Parameters: map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"format": map[string]interface{}{
-							"type":        "string",
-							"description": "The time format (optional, defaults to 2006-01-02 15:04:05)",
-						},
+// NewGetCurrentTimeFunction creates a self-describing getCurrentTime function
+func NewGetCurrentTimeFunction() *Function {
+	return &Function{
+		Definition: openai.FunctionDefinition{
+			Name:        "get_current_time",
+			Description: "Get the current date and time",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"format": map[string]interface{}{
+						"type":        "string",
+						"description": "The time format (optional, defaults to 2006-01-02 15:04:05)",
 					},
-					"required": []string{},
 				},
+				"required": []string{},
 			},
+		},
+		Handler: func(args map[string]interface{}) (string, error) {
+			now := time.Now()
+			format := "2006-01-02 15:04:05"
+			
+			// Check if a specific format is requested
+			if f, ok := args["format"]; ok {
+				if formatStr, ok := f.(string); ok {
+					format = formatStr
+				}
+			}
+			
+			return fmt.Sprintf("Current time: %s", now.Format(format)), nil
 		},
 	}
 }
 
-// ExecuteFunction executes a registered function by name
+// GetAvailableTools returns the available tools for function calling
+func GetAvailableTools() []openai.Tool {
+	return functionRegistry.GetTools()
+}
+
+// ExecuteFunction executes a registered function by name (for backward compatibility)
 func ExecuteFunction(name string, arguments string) (string, error) {
-	functionMux.RLock()
-	handler, exists := functionHandlers[name]
-	functionMux.RUnlock()
-
-	if !exists {
-		return "", fmt.Errorf("function %s not found", name)
-	}
-
-	// Parse arguments
-	var args map[string]interface{}
-	if arguments != "" {
-		err := json.Unmarshal([]byte(arguments), &args)
-		if err != nil {
-			return "", fmt.Errorf("failed to parse function arguments: %v", err)
-		}
-	}
-
-	return handler(args)
+	return functionRegistry.Execute(name, arguments)
 }

@@ -50,6 +50,13 @@ func TestFunctionCalling(t *testing.T) {
 	}
 	fmt.Printf("Direct function call result: %s\n", result)
 
+	// Test self-describing function access
+	fn, exists := functionRegistry.GetFunction("get_current_time")
+	if !exists {
+		t.Fatalf("Function not found in registry")
+	}
+	fmt.Printf("Function definition description: %s\n", fn.Definition.Description)
+
 	// Try a more explicit request
 	response, err := SendChatMessageWithTools("Please use the get_current_time function to tell me what time it is now.", tools)
 	if err != nil {
@@ -58,12 +65,12 @@ func TestFunctionCalling(t *testing.T) {
 
 	// Print the response
 	fmt.Printf("Function call response: '%s'\n", response)
-	
+
 	// Check chat history
 	history := GetChatHistory()
 	fmt.Printf("Chat history length: %d\n", len(history))
 	for i, msg := range history {
-		fmt.Printf("Message %d: Role=%s, Content=%s, ToolCalls=%d\n", 
+		fmt.Printf("Message %d: Role=%s, Content=%s, ToolCalls=%d\n",
 			i, msg.Role, msg.Content, len(msg.ToolCalls))
 	}
 }
