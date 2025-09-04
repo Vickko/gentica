@@ -1,4 +1,4 @@
-package chatnew
+package chat
 
 import (
 	"fmt"
@@ -18,10 +18,10 @@ func TestRealLLMWithAllTools(t *testing.T) {
 	}
 
 	// Check if config file exists
-	configPath := "./config/config.yaml"
+	configPath := "./configs/config.yaml"
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Try parent directory config
-		configPath = "../config/config.yaml"
+		configPath = "../configs/config.yaml"
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			t.Skip("Config file not found, skipping LLM test")
 		}
@@ -52,7 +52,7 @@ func TestRealLLMWithAllTools(t *testing.T) {
 
 	// Get available tools
 	tools := GetAvailableTools()
-	
+
 	// Create a comprehensive prompt that will test all tools
 	prompt := fmt.Sprintf(`You are a helpful assistant with access to various tools. I need you to help me test that all tools are working correctly. Please perform the following tasks in order:
 
@@ -83,14 +83,14 @@ func TestRealLLMWithAllTools(t *testing.T) {
 
 11. Finally, use 'ls' again to show all files created in %s
 
-After completing all tasks, provide a summary of what was accomplished.`, 
+After completing all tasks, provide a summary of what was accomplished.`,
 		testDir, testDir, filepath.Join(testDir, "test.txt"), testDir, testDir, testDir)
 
 	// Send the message with tools
 	t.Log("\n=== Sending prompt to LLM ===")
 	t.Logf("Prompt:\n%s\n", prompt)
 	t.Log("\n=== Executing tools (this may take a while) ===")
-	
+
 	response, err := SendChatMessageWithTools(prompt, tools)
 	if err != nil {
 		t.Fatalf("Failed to send chat message: %v", err)
@@ -109,7 +109,7 @@ After completing all tasks, provide a summary of what was accomplished.`,
 		content, _ := os.ReadFile(testFile)
 		t.Log("✅ test.txt created")
 		t.Logf("   Content: %s", string(content))
-		
+
 		// Check if edit was applied
 		if !strings.Contains(string(content), "Hello LLM") {
 			t.Error("❌ Edit tool didn't change 'Hello World' to 'Hello LLM'")
@@ -125,7 +125,7 @@ After completing all tasks, provide a summary of what was accomplished.`,
 		content, _ := os.ReadFile(test2File)
 		t.Log("✅ test2.md created")
 		t.Logf("   Content: %s", string(content))
-		
+
 		// Check if multiedit was applied
 		if !strings.Contains(string(content), "Test Document Updated") {
 			t.Error("❌ MultiEdit tool didn't update the document title")
@@ -137,7 +137,7 @@ After completing all tasks, provide a summary of what was accomplished.`,
 	// Check the chat history to see which tools were called
 	history := GetChatHistory()
 	toolsUsed := make(map[string]int)
-	
+
 	t.Log("\n=== Detailed Tool Call History ===")
 	for i, msg := range history {
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
@@ -183,14 +183,14 @@ func TestRealLLMSimpleToolCall(t *testing.T) {
 	if os.Getenv("SKIP_LLM_TEST") != "" {
 		t.Skip("Skipping LLM integration test")
 	}
-	
+
 	t.Log("=== Starting Simple Tool Call Test ===")
 
 	// Check if config file exists
-	configPath := "./config/config.yaml"
+	configPath := "./configs/config.yaml"
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// Try parent directory config
-		configPath = "../config/config.yaml"
+		configPath = "../configs/config.yaml"
 		if _, err := os.Stat(configPath); os.IsNotExist(err) {
 			t.Skip("Config file not found, skipping LLM test")
 		}
@@ -324,7 +324,7 @@ func TestRealLLMToolChaining(t *testing.T) {
 	t.Log("\n=== Tool Execution Sequence ===")
 	history := GetChatHistory()
 	toolSequence := []string{}
-	
+
 	for _, msg := range history {
 		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
 			for _, toolCall := range msg.ToolCalls {

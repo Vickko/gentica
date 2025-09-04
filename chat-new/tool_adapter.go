@@ -1,4 +1,4 @@
-package chatnew
+package chat
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sashabaranov/go-openai"
+
 	"gentica/llm/tools"
 )
 
@@ -29,7 +30,7 @@ func NewToolAdapter(tool tools.BaseTool) *ToolAdapter {
 // ConvertToFunction converts an llm/tools.BaseTool to a chat-new.Function
 func (ta *ToolAdapter) ConvertToFunction() *Function {
 	toolInfo := ta.tool.Info()
-	
+
 	return &Function{
 		Definition: openai.FunctionDefinition{
 			Name:        toolInfo.Name,
@@ -44,11 +45,11 @@ func (ta *ToolAdapter) ConvertToFunction() *Function {
 func (ta *ToolAdapter) convertParameters(info tools.ToolInfo) map[string]interface{} {
 	// Create the parameters schema
 	schema := map[string]interface{}{
-		"type": "object",
+		"type":       "object",
 		"properties": info.Parameters,
-		"required": info.Required,
+		"required":   info.Required,
 	}
-	
+
 	return schema
 }
 
@@ -60,25 +61,25 @@ func (ta *ToolAdapter) createHandler() FunctionHandler {
 		if err != nil {
 			return "", fmt.Errorf("failed to marshal arguments: %w", err)
 		}
-		
+
 		// Create a ToolCall
 		toolCall := tools.ToolCall{
 			ID:    generateToolCallID(),
 			Name:  ta.tool.Name(),
 			Input: string(inputJSON),
 		}
-		
+
 		// Execute the tool
 		response, err := ta.tool.Run(ta.ctx, toolCall)
 		if err != nil {
 			return "", fmt.Errorf("tool execution failed: %w", err)
 		}
-		
+
 		// Handle different response types
 		if response.IsError {
 			return "", fmt.Errorf("%s", response.Content)
 		}
-		
+
 		return response.Content, nil
 	}
 }
@@ -109,7 +110,7 @@ func RegisterLLMTools(registry *FunctionRegistry, workingDir string) {
 		tools.NewFetchTool(workingDir),
 		tools.NewDownloadTool(workingDir),
 	}
-	
+
 	// Convert and register each tool
 	for _, tool := range llmTools {
 		adapter := NewToolAdapter(tool)

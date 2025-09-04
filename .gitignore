@@ -1,5 +1,5 @@
 # Config files (keep sample, ignore actual config)
-config/config.yaml
+configs/config.yaml
 
 # Go build artifacts
 *.exe

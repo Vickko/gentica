@@ -1,6 +1,7 @@
-package chatnew
+package chat
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,11 +10,6 @@ import (
 	"time"
 
 	"github.com/sashabaranov/go-openai"
-)
-
-import (
-	"context"
-
 	"gopkg.in/yaml.v2"
 )
 
@@ -303,7 +299,7 @@ func SendChatMessageWithTools(userMessage string, tools []openai.Tool) (string, 
 // InitializeChat initializes the chat system with configuration
 func InitializeChat() error {
 	// Load configuration
-	configPath := "./config/config.yaml"
+	configPath := "./configs/config.yaml"
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return fmt.Errorf("config file not found at %s", configPath)
 	}

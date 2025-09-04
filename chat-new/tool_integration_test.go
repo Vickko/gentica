@@ -1,4 +1,4 @@
-package chatnew
+package chat
 
 import (
 	"os"
@@ -56,7 +56,7 @@ func TestToolHandlerExecution(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := filepath.Join(tempDir, "test.txt")
 	testContent := "Hello, World!\nThis is a test file."
-	
+
 	err := os.WriteFile(testFile, []byte(testContent), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -86,7 +86,7 @@ func TestToolHandlerExecution(t *testing.T) {
 func TestLsToolIntegration(t *testing.T) {
 	// Create a temporary test directory structure
 	tempDir := t.TempDir()
-	
+
 	// Create some test files and directories
 	os.MkdirAll(filepath.Join(tempDir, "subdir"), 0755)
 	os.WriteFile(filepath.Join(tempDir, "file1.txt"), []byte("test"), 0644)
