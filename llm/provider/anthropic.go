@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,9 +19,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm" // for config
 	"gentica/llm/tools"
 	// "github.com/charmbracelet/crush/internal/log"
-	// "github.com/charmbracelet/crush/internal/message"
+	"gentica/message"
 )
 
 // Pre-compiled regex for parsing context limit errors.
@@ -80,14 +82,14 @@ func createAnthropicClient(opts providerClientOptions, tp AnthropicClientType) a
 	}
 
 	if opts.baseURL != "" {
-		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
+		resolvedBaseURL, err := llm.Get().Resolve(opts.baseURL)
 		if err == nil && resolvedBaseURL != "" {
 			anthropicClientOptions = append(anthropicClientOptions, option.WithBaseURL(resolvedBaseURL))
 		}
 	}
 
-	if config.Get().Options.Debug {
-		httpClient := log.NewHTTPClient()
+	if llm.Get().Options.Debug {
+		httpClient := &http.Client{}
 		anthropicClientOptions = append(anthropicClientOptions, option.WithHTTPClient(httpClient))
 	}
 
@@ -223,10 +225,10 @@ func (a *anthropicClient) finishReason(reason string) message.FinishReason {
 }
 
 func (a *anthropicClient) isThinkingEnabled() bool {
-	cfg := config.Get()
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if a.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	cfg := llm.Get()
+	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
+	if a.providerOptions.modelType == llm.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
 	}
 	return a.Model().CanReason && modelConfig.Think
 }
@@ -234,10 +236,10 @@ func (a *anthropicClient) isThinkingEnabled() bool {
 func (a *anthropicClient) preparedMessages(messages []anthropic.MessageParam, tools []anthropic.ToolUnionParam) anthropic.MessageNewParams {
 	model := a.providerOptions.model(a.providerOptions.modelType)
 	var thinkingParam anthropic.ThinkingConfigParamUnion
-	cfg := config.Get()
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if a.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	cfg := llm.Get()
+	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
+	if a.providerOptions.modelType == llm.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
 	}
 	temperature := anthropic.Float(0)
 
@@ -493,7 +495,7 @@ func (a *anthropicClient) shouldRetry(attempts int, err error) (bool, int64, err
 	}
 
 	if apiErr.StatusCode == 401 {
-		a.providerOptions.apiKey, err = config.Get().Resolve(a.providerOptions.config.APIKey)
+		a.providerOptions.apiKey, err = llm.Get().Resolve(a.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}

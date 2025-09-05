@@ -2,6 +2,8 @@ package provider
 
 import (
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm" // for config
+	"net/http"
 	// "github.com/charmbracelet/crush/internal/log"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/azure"
@@ -24,8 +26,8 @@ func newAzureClient(opts providerClientOptions) AzureClient {
 		azure.WithEndpoint(opts.baseURL, apiVersion),
 	}
 
-	if config.Get().Options.Debug {
-		httpClient := log.NewHTTPClient()
+	if llm.Get().Options.Debug {
+		httpClient := &http.Client{}
 		reqOpts = append(reqOpts, option.WithHTTPClient(httpClient))
 	}
 

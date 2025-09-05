@@ -11,16 +11,19 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm" // for config
+	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
 
 func TestMain(m *testing.M) {
-	_, err := config.Init(".", "", true)
-	if err != nil {
-		panic("Failed to initialize config: " + err.Error())
-	}
+	// Skip config initialization in test
+	// _, err := config.Init(".", "", true)
+	// if err != nil {
+	//	panic("Failed to initialize config: " + err.Error())
+	// }
 
 	os.Exit(m.Run())
 }
@@ -51,10 +54,10 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 	// Create OpenAI client pointing to our mock server
 	client := &openaiClient{
 		providerOptions: providerClientOptions{
-			modelType:     config.SelectedModelTypeLarge,
+			modelType:     llm.SelectedModelTypeLarge,
 			apiKey:        "test-key",
 			systemMessage: "test",
-			model: func(config.SelectedModelType) catwalk.Model {
+			model: func(llm.SelectedModelType) catwalk.Model {
 				return catwalk.Model{
 					ID:   "test-model",
 					Name: "test-model",

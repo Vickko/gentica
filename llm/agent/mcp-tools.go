@@ -5,16 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gentica/config"
 	"log/slog"
-	"maps"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	// "github.com/charmbracelet/crush/internal/config"
 	// "github.com/charmbracelet/crush/internal/csync"
+	"gentica/llm"
 	"gentica/llm/tools"
+	"gentica/pubsub"
 	// "github.com/charmbracelet/crush/internal/pubsub"
 	// "github.com/charmbracelet/crush/internal/version"
 	"github.com/mark3labs/mcp-go/client"
@@ -76,14 +77,15 @@ type MCPClientInfo struct {
 var (
 	mcpToolsOnce sync.Once
 	mcpTools     []tools.BaseTool
-	mcpClients   = csync.NewMap[string, *client.Client]()
-	mcpStates    = csync.NewMap[string, MCPClientInfo]()
+	mcpClients   = llm.NewMap[string, *client.Client]()
+	mcpStates    = llm.NewMap[string, MCPClientInfo]()
 	mcpBroker    = pubsub.NewBroker[MCPEvent]()
 )
 
 type McpTool struct {
-	mcpName     string
-	tool        mcp.Tool	workingDir  string
+	mcpName    string
+	tool       mcp.Tool
+	workingDir string
 }
 
 func (b *McpTool) Name() string {
@@ -144,7 +146,7 @@ func getOrRenewClient(ctx context.Context, name string) (*client.Client, error) 
 		return nil, fmt.Errorf("mcp '%s' not available", name)
 	}
 
-	m := config.Get().MCP[name]
+	m := llm.Get().MCP[name]
 	state, _ := mcpStates.Get(name)
 
 	pingCtx, cancel := context.WithTimeout(ctx, mcpTimeout(m))
@@ -170,26 +172,27 @@ func (b *McpTool) Run(ctx context.Context, params tools.ToolCall) (tools.ToolRes
 	if sessionID == "" || messageID == "" {
 		return tools.ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
-	permissionDescription := fmt.Sprintf("execute %s with the following parameters: %s", b.Info().Name, params.Input)
-// Permission check removed
-		//permission.CreatePermissionRequest{
-			SessionID:   sessionID,
-			ToolCallID:  params.ID,
-			Path:        b.workingDir,
-			ToolName:    b.Info().Name,
-			Action:      "execute",
-			Description: permissionDescription,
-			Params:      params.Input,
-		},
-	)
-	if !p {
-		return tools.ToolResponse{}, fmt.Errorf("permission denied")
-	}
+	// Permission check removed - commented out for now
+	// permissionDescription := fmt.Sprintf("execute %s with the following parameters: %s", b.Info().Name, params.Input)
+	// p := permission.Check(
+	//	permission.CreatePermissionRequest{
+	//		SessionID:   sessionID,
+	//		ToolCallID:  params.ID,
+	//		Path:        b.workingDir,
+	//		ToolName:    b.Info().Name,
+	//		Action:      "execute",
+	//		Description: permissionDescription,
+	//		Params:      params.Input,
+	//	},
+	// )
+	// if !p {
+	//	return tools.ToolResponse{}, fmt.Errorf("permission denied")
+	// }
 
 	return runTool(ctx, b.mcpName, b.tool.Name, params.Input)
 }
 
-func getTools(ctx context.Context, name string,  c *client.Client, workingDir string) []tools.BaseTool {
+func getTools(ctx context.Context, name string, c *client.Client, workingDir string) []tools.BaseTool {
 	result, err := c.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
 		slog.Error("error listing tools", "error", err)
@@ -201,10 +204,10 @@ func getTools(ctx context.Context, name string,  c *client.Client, workingDir st
 	mcpTools := make([]tools.BaseTool, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		mcpTools = append(mcpTools, &McpTool{
-			mcpName:     name,
-			tool:        tool,
-			
-			workingDir:  workingDir,
+			mcpName: name,
+			tool:    tool,
+
+			workingDir: workingDir,
 		})
 	}
 	return mcpTools
@@ -217,7 +220,7 @@ func SubscribeMCPEvents(ctx context.Context) <-chan pubsub.Event[MCPEvent] {
 
 // GetMCPStates returns the current state of all MCP clients
 func GetMCPStates() map[string]MCPClientInfo {
-	return maps.Collect(mcpStates.Seq2())
+	return mcpStates.Seq()
 }
 
 // GetMCPState returns the state of a specific MCP client
@@ -251,7 +254,7 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
 func CloseMCPClients() {
-	for c := range mcpClients.Seq() {
+	for _, c := range mcpClients.Seq() {
 		_ = c.Close()
 	}
 	mcpBroker.Shutdown()
@@ -261,13 +264,13 @@ var mcpInitRequest = mcp.InitializeRequest{
 	Params: mcp.InitializeParams{
 		ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
 		ClientInfo: mcp.Implementation{
-			Name:    "Crush",
-			Version: version.Version,
+			Name:    "Gentica",
+			Version: "0.0.1",
 		},
 	},
 }
 
-func doGetMCPTools(ctx context.Context,  cfg *config.Config) []tools.BaseTool {
+func doGetMCPTools(ctx context.Context, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
 	result := csync.NewSlice[tools.BaseTool]()
 
@@ -309,16 +312,18 @@ func doGetMCPTools(ctx context.Context,  cfg *config.Config) []tools.BaseTool {
 			}
 			mcpClients.Set(name, c)
 
-			tools := getTools(ctx, name, permissions, c, cfg.WorkingDir())
+			tools := getTools(ctx, name, c, cfg.WorkingDir())
 			updateMCPState(name, MCPStateConnected, nil, c, len(tools))
-			result.Append(tools...)
+			for _, tool := range tools {
+				result.Append(tool)
+			}
 		}(name, m)
 	}
 	wg.Wait()
-	return slices.Collect(result.Seq())
+	return result.Get()
 }
 
-func createAndInitializeClient(ctx context.Context, name string, m config.MCPConfig) (*client.Client, error) {
+func createAndInitializeClient(ctx context.Context, name string, m llm.MCPConfig) (*client.Client, error) {
 	c, err := createMcpClient(m)
 	if err != nil {
 		updateMCPState(name, MCPStateError, err, nil, 0)
@@ -326,7 +331,7 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 		return nil, err
 	}
 	// Only call Start() for non-stdio clients, as stdio clients auto-start
-	if m.Type != config.MCPStdio {
+	if m.Type != llm.MCPStdio {
 		if err := c.Start(ctx); err != nil {
 			updateMCPState(name, MCPStateError, err, nil, 0)
 			slog.Error("error starting mcp client", "error", err, "name", name)
@@ -345,34 +350,34 @@ func createAndInitializeClient(ctx context.Context, name string, m config.MCPCon
 	return c, nil
 }
 
-func createMcpClient(m config.MCPConfig) (*client.Client, error) {
+func createMcpClient(m llm.MCPConfig) (*client.Client, error) {
 	switch m.Type {
-	case config.MCPStdio:
+	case llm.MCPStdio:
 		if strings.TrimSpace(m.Command) == "" {
 			return nil, fmt.Errorf("mcp stdio config requires a non-empty 'command' field")
 		}
 		return client.NewStdioMCPClientWithOptions(
 			m.Command,
-			m.ResolvedEnv(),
+			m.ResolvedEnv,
 			m.Args,
 			transport.WithCommandLogger(mcpLogger{}),
 		)
-	case config.MCPHttp:
+	case llm.MCPHttp:
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp http config requires a non-empty 'url' field")
 		}
 		return client.NewStreamableHttpClient(
 			m.URL,
-			transport.WithHTTPHeaders(m.ResolvedHeaders()),
+			transport.WithHTTPHeaders(m.ResolvedHeaders),
 			transport.WithHTTPLogger(mcpLogger{}),
 		)
-	case config.MCPSse:
+	case llm.MCPSse:
 		if strings.TrimSpace(m.URL) == "" {
 			return nil, fmt.Errorf("mcp sse config requires a non-empty 'url' field")
 		}
 		return client.NewSSEMCPClient(
 			m.URL,
-			client.WithHeaders(m.ResolvedHeaders()),
+			client.WithHeaders(m.ResolvedHeaders),
 			transport.WithSSELogger(mcpLogger{}),
 		)
 	default:
@@ -386,6 +391,6 @@ type mcpLogger struct{}
 func (l mcpLogger) Errorf(format string, v ...any) { slog.Error(fmt.Sprintf(format, v...)) }
 func (l mcpLogger) Infof(format string, v ...any)  { slog.Info(fmt.Sprintf(format, v...)) }
 
-func mcpTimeout(m config.MCPConfig) time.Duration {
+func mcpTimeout(m llm.MCPConfig) time.Duration {
 	return time.Duration(cmp.Or(m.Timeout, 15)) * time.Second
 }

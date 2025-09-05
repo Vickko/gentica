@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm"       // for config
 	"gentica/llm/tools"
+	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/log"
 	// "github.com/charmbracelet/crush/internal/message"
 	"github.com/google/uuid"
@@ -44,8 +47,8 @@ func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
 		APIKey:  opts.apiKey,
 		Backend: genai.BackendGeminiAPI,
 	}
-	if config.Get().Options.Debug {
-		cc.HTTPClient = log.NewHTTPClient()
+	if llm.Get().Options.Debug {
+		cc.HTTPClient = &http.Client{}
 	}
 	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
@@ -176,11 +179,11 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := config.Get()
+	cfg := llm.Get()
 
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == llm.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
 	}
 
 	maxTokens := model.DefaultMaxTokens
@@ -272,11 +275,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	geminiMessages := g.convertMessages(messages)
 
 	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := config.Get()
+	cfg := llm.Get()
 
-	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
+	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == llm.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
 	}
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
@@ -432,7 +435,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
+		g.providerOptions.apiKey, err = llm.Get().Resolve(g.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}

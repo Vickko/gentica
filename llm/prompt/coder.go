@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm"
 	"gentica/llm/tools"
 )
 
@@ -32,7 +33,7 @@ func CoderPrompt(p string, contextFiles ...string) string {
 
 	basePrompt = fmt.Sprintf("%s\n\n%s\n%s", basePrompt, envInfo, lspInformation())
 
-	contextContent := getContextFromPaths(config.Get().WorkingDir(), contextFiles)
+	contextContent := getContextFromPaths(llm.Get().WorkingDir(), contextFiles)
 	if contextContent != "" {
 		return fmt.Sprintf("%s\n\n# Project-Specific Context\n Make sure to follow the instructions in the context below\n%s", basePrompt, contextContent)
 	}
@@ -52,11 +53,11 @@ var openaiCoderPrompt []byte
 var coderV2Prompt []byte
 
 func getEnvironmentInfo() string {
-	cwd := config.Get().WorkingDir()
+	cwd := llm.Get().WorkingDir()
 	isGit := isGitRepo(cwd)
 	platform := runtime.GOOS
 	date := time.Now().Format("1/2/2006")
-	output, _ := tools.ListDirectoryTree(cwd, nil)
+	output, _, _, _ := tools.ListDirectoryTree(cwd, nil)
 	return fmt.Sprintf(`Here is useful information about the environment you are running in:
 <env>
 Working directory: %s
@@ -76,7 +77,7 @@ func isGitRepo(dir string) bool {
 }
 
 func lspInformation() string {
-	cfg := config.Get()
+	cfg := llm.Get()
 	hasLSP := false
 	for _, v := range cfg.LSP {
 		if !v.Disabled {

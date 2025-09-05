@@ -10,6 +10,7 @@ import (
 	// "github.com/charmbracelet/crush/internal/csync"
 	// "github.com/charmbracelet/crush/internal/env"
 	// "github.com/charmbracelet/crush/internal/home"
+	"gentica/llm"
 )
 
 type PromptID string
@@ -45,11 +46,11 @@ func getContextFromPaths(workingDir string, contextPaths []string) string {
 
 // expandPath expands ~ and environment variables in file paths
 func expandPath(path string) string {
-	path = home.Long(path)
+	path = llm.HomeLong(path)
 
 	// Handle environment variable expansion using the same pattern as config
 	if strings.HasPrefix(path, "$") {
-		resolver := config.NewEnvironmentVariableResolver(env.New())
+		resolver := llm.NewEnvironmentVariableResolver(llm.NewEnv())
 		if expanded, err := resolver.ResolveValue(path); err == nil {
 			path = expanded
 		}
@@ -65,7 +66,7 @@ func processContextPaths(workDir string, paths []string) string {
 	)
 
 	// Track processed files to avoid duplicates
-	processedFiles := csync.NewMap[string, bool]()
+	processedFiles := llm.NewMap[string, bool]()
 
 	for _, path := range paths {
 		wg.Add(1)

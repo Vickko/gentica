@@ -7,7 +7,9 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm"       // for config
 	"gentica/llm/tools"
+	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/message"
 )
 
@@ -63,10 +65,10 @@ type Provider interface {
 
 type providerClientOptions struct {
 	baseURL            string
-	config             config.ProviderConfig
+	config             llm.ProviderConfig
 	apiKey             string
-	modelType          config.SelectedModelType
-	model              func(config.SelectedModelType) catwalk.Model
+	modelType          llm.SelectedModelType
+	model              func(llm.SelectedModelType) catwalk.Model
 	disableCache       bool
 	systemMessage      string
 	systemPromptPrefix string
@@ -115,7 +117,7 @@ func (p *baseProvider[C]) Model() catwalk.Model {
 	return p.client.Model()
 }
 
-func WithModel(model config.SelectedModelType) ProviderClientOption {
+func WithModel(model llm.SelectedModelType) ProviderClientOption {
 	return func(options *providerClientOptions) {
 		options.modelType = model
 	}
@@ -139,10 +141,10 @@ func WithMaxTokens(maxTokens int64) ProviderClientOption {
 	}
 }
 
-func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
-	restore := config.PushPopCrushEnv()
-	defer restore()
-	resolvedAPIKey, err := config.Get().Resolve(cfg.APIKey)
+func NewProvider(cfg llm.ProviderConfig, opts ...ProviderClientOption) (Provider, error) {
+	// restore := config.PushPopCrushEnv()
+	// defer restore()
+	resolvedAPIKey, err := llm.Get().Resolve(cfg.APIKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve API key for provider %s: %w", cfg.ID, err)
 	}
@@ -150,7 +152,7 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 	// Resolve extra headers
 	resolvedExtraHeaders := make(map[string]string)
 	for key, value := range cfg.ExtraHeaders {
-		resolvedValue, err := config.Get().Resolve(value)
+		resolvedValue, err := llm.Get().Resolve(value)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve extra header %s for provider %s: %w", key, cfg.ID, err)
 		}
@@ -165,8 +167,8 @@ func NewProvider(cfg config.ProviderConfig, opts ...ProviderClientOption) (Provi
 		extraBody:          cfg.ExtraBody,
 		extraParams:        cfg.ExtraParams,
 		systemPromptPrefix: cfg.SystemPromptPrefix,
-		model: func(tp config.SelectedModelType) catwalk.Model {
-			return *config.Get().GetModelByType(tp)
+		model: func(tp llm.SelectedModelType) catwalk.Model {
+			return llm.Get().GetModelByType(tp)
 		},
 	}
 	for _, o := range opts {

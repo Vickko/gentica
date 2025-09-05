@@ -3,9 +3,11 @@ package provider
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"strings"
 
 	// "github.com/charmbracelet/crush/internal/config"
+	"gentica/llm" // for config
 	// "github.com/charmbracelet/crush/internal/log"
 	"google.golang.org/genai"
 )
@@ -20,8 +22,8 @@ func newVertexAIClient(opts providerClientOptions) VertexAIClient {
 		Location: location,
 		Backend:  genai.BackendVertexAI,
 	}
-	if config.Get().Options.Debug {
-		cc.HTTPClient = log.NewHTTPClient()
+	if llm.Get().Options.Debug {
+		cc.HTTPClient = &http.Client{}
 	}
 	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
