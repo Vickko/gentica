@@ -1,0 +1,45 @@
+// Example configuration for agents with the new architecture
+// This demonstrates how agents can be configured to call each other
+
+{
+  "agents": {
+    "coder": {
+      "id": "coder",
+      "name": "Coder Agent",
+      "description": "Agent specialized in coding tasks",
+      "model": "large",
+      "allowed_tools": ["bash", "edit", "multi_edit", "grep", "glob", "view", "write"],
+      "allowed_agents": ["task", "research"]  // Coder can call task and research agents
+    },
+    "task": {
+      "id": "task",
+      "name": "Task Agent", 
+      "description": "Agent for general task execution",
+      "model": "small",
+      "allowed_tools": ["grep", "glob", "view", "ls"],
+      "allowed_agents": ["research"]  // Task can call research agent
+    },
+    "research": {
+      "id": "research",
+      "name": "Research Agent",
+      "description": "Agent specialized in searching and gathering information",
+      "model": "small",
+      "allowed_tools": ["grep", "glob", "view", "fetch", "sourcegraph"],
+      "allowed_agents": []  // Research doesn't call other agents
+    },
+    "writer": {
+      "id": "writer",
+      "name": "Writer Agent",
+      "description": "Agent specialized in writing documentation and content",
+      "model": "large",
+      "allowed_tools": ["view", "write", "edit"],
+      "allowed_agents": ["research"]  // Writer can call research for information
+    }
+  }
+}
+
+// Usage example:
+// 1. All agents are equal and can be used as the main agent
+// 2. Any agent can call other agents based on AllowedAgents configuration
+// 3. No hardcoded master-slave relationship
+// 4. Easy to add new agents by just adding configuration

@@ -11,17 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	// "github.com/charmbracelet/crush/internal/csync"
-	// "github.com/charmbracelet/crush/internal/history"
+	"gentica/csync"
 	"gentica/llm/provider"
 	"gentica/llm/tools"
 	"gentica/message"
-	// "github.com/charmbracelet/crush/internal/log"
-	// "github.com/charmbracelet/crush/internal/message"
-	// "github.com/charmbracelet/crush/internal/pubsub"
 	"gentica/session"
-	// "github.com/charmbracelet/crush/internal/shell"
+
+	"github.com/charmbracelet/catwalk/pkg/catwalk"
 )
 
 // Common errors
@@ -79,40 +75,21 @@ type agent struct {
 	summarizeProvider   provider.Provider
 	summarizeProviderID string
 
-	activeRequests *config.SyncMap[string, context.CancelFunc]
+	activeRequests *csync.Map[string, context.CancelFunc]
 
-	promptQueue *config.SyncMap[string, []string]
+	promptQueue *csync.Map[string, []string]
 }
-
-// var agentPromptMap = map[string]prompt.PromptID{
-// 	"coder": prompt.PromptCoder,
-// 	"task":  prompt.PromptTask,
-// }
 
 func NewAgent(
 	ctx context.Context,
 	agentCfg config.Agent,
 // These services are needed in the tools
-
 	sessions session.Service,
 	messages message.Service,
-// history llm.HistoryService,
+// Optional agent tools that can be injected
+	agentTools map[string]tools.BaseTool,
 ) (Service, error) {
 	cfg := config.Get()
-
-	var agentTool tools.BaseTool
-	if agentCfg.ID == "coder" {
-		taskAgentCfg := config.Get().Agents["task"]
-		if taskAgentCfg.ID == "" {
-			return nil, fmt.Errorf("task agent not found in config")
-		}
-		taskAgent, err := NewAgent(ctx, taskAgentCfg, sessions, messages)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create task agent: %w", err)
-		}
-
-		agentTool = NewAgentTool(taskAgent, sessions, messages)
-	}
 
 	providerCfg := config.Get().GetProviderForModel(agentCfg.Model)
 	if providerCfg.ID == "" {
@@ -124,13 +101,9 @@ func NewAgent(
 		return nil, fmt.Errorf("model not found for agent %s", agentCfg.Name)
 	}
 
-	// promptID := agentPromptMap[agentCfg.ID]
-	// if promptID == "" {
-	// 	promptID = prompt.PromptDefault
-	// }
 	opts := []provider.ProviderClientOption{
 		provider.WithModel(agentCfg.Model),
-		// provider.WithSystemMessage(prompt.GetPrompt(promptID, providerCfg.ID, config.Get().Options.ContextPaths...)),
+		provider.WithSystemMessage("You are a helpful AI assistant."), // Default system message
 	}
 	agentProvider, err := provider.NewProvider(*providerCfg, opts...)
 	if err != nil {
@@ -201,8 +174,11 @@ func NewAgent(
 		//	allTools = append(allTools, tools.NewDiagnosticsTool(lspClients))
 		// }
 
-		if agentTool != nil {
-			allTools = append(allTools, agentTool)
+		// Add injected agent tools
+		if agentTools != nil {
+			for _, tool := range agentTools {
+				allTools = append(allTools, tool)
+			}
 		}
 
 		if agentCfg.AllowedTools == nil {
@@ -228,9 +204,9 @@ func NewAgent(
 		titleProvider:       titleProvider,
 		summarizeProvider:   summarizeProvider,
 		summarizeProviderID: string(providerCfg.ID),
-		activeRequests:      config.NewSyncMap[string, context.CancelFunc](),
+		activeRequests:      csync.NewMap[string, context.CancelFunc](),
 		tools:               config.NewLazySlice(toolFn),
-		promptQueue:         config.NewSyncMap[string, []string](),
+		promptQueue:         csync.NewMap[string, []string](),
 	}, nil
 }
 
@@ -954,11 +930,6 @@ func (a *agent) UpdateModel() error {
 		if model.ID == "" {
 			return fmt.Errorf("model not found for agent %s", a.agentCfg.Name)
 		}
-
-		// promptID := agentPromptMap[a.agentCfg.ID]
-		// if promptID == "" {
-		// 	promptID = prompt.PromptDefault
-		// }
 
 		opts := []provider.ProviderClientOption{
 			provider.WithModel(a.agentCfg.Model),

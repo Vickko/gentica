@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"gentica/config"
+	"gentica/csync"
 	"log/slog"
 	"strings"
 	"sync"
@@ -69,44 +70,11 @@ type MCPClientInfo struct {
 	ConnectedAt time.Time
 }
 
-// SyncSlice is a thread-safe slice implementation
-type SyncSlice[T any] struct {
-	mu    sync.RWMutex
-	items []T
-}
-
-// NewSyncSlice creates a new SyncSlice
-func NewSyncSlice[T any]() *SyncSlice[T] {
-	return &SyncSlice[T]{
-		items: make([]T, 0),
-	}
-}
-
-// Append adds items to the slice
-func (s *SyncSlice[T]) Append(items ...T) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.items = append(s.items, items...)
-}
-
-// Seq returns an iterator for the slice
-func (s *SyncSlice[T]) Seq() func(func(T) bool) {
-	return func(yield func(T) bool) {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		for _, item := range s.items {
-			if !yield(item) {
-				return
-			}
-		}
-	}
-}
-
 var (
 	mcpToolsOnce sync.Once
 	mcpTools     []tools.BaseTool
-	mcpClients   = config.NewSyncMap[string, *client.Client]()
-	mcpStates    = config.NewSyncMap[string, MCPClientInfo]()
+	mcpClients   = csync.NewMap[string, *client.Client]()
+	mcpStates    = csync.NewMap[string, MCPClientInfo]()
 	mcpBroker    = pubsub.NewBroker[MCPEvent]()
 )
 
@@ -227,10 +195,9 @@ func SubscribeMCPEvents(ctx context.Context) <-chan pubsub.Event[MCPEvent] {
 // GetMCPStates returns the current state of all MCP clients
 func GetMCPStates() map[string]MCPClientInfo {
 	result := make(map[string]MCPClientInfo)
-	mcpStates.Range(func(k string, v MCPClientInfo) bool {
+	for k, v := range mcpStates.Seq2() {
 		result[k] = v
-		return true
-	})
+	}
 	return result
 }
 
@@ -265,10 +232,9 @@ func updateMCPState(name string, state MCPState, err error, client *client.Clien
 
 // CloseMCPClients closes all MCP clients. This should be called during application shutdown.
 func CloseMCPClients() {
-	mcpClients.Range(func(name string, c *client.Client) bool {
+	for _, c := range mcpClients.Seq2() {
 		_ = c.Close()
-		return true
-	})
+	}
 	mcpBroker.Shutdown()
 }
 
@@ -284,7 +250,7 @@ var mcpInitRequest = mcp.InitializeRequest{
 
 func doGetMCPTools(ctx context.Context, cfg *config.Config) []tools.BaseTool {
 	var wg sync.WaitGroup
-	result := NewSyncSlice[tools.BaseTool]()
+	result := csync.NewSlice[tools.BaseTool]()
 
 	// Initialize states for all configured MCPs
 	for name, m := range cfg.MCP {
