@@ -53,6 +53,17 @@ func (m *SyncMap[K, V]) Del(key K) {
 	delete(m.data, key)
 }
 
+// Take retrieves and removes a value by key
+func (m *SyncMap[K, V]) Take(key K) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	val, ok := m.data[key]
+	if ok {
+		delete(m.data, key)
+	}
+	return val, ok
+}
+
 // Len returns the number of items
 func (m *SyncMap[K, V]) Len() int {
 	m.mu.RLock()
