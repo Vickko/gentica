@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/shell"
 )
 
 type VariableResolver interface {
@@ -20,14 +17,14 @@ type Shell interface {
 
 type shellVariableResolver struct {
 	shell Shell
-	env   env.Env
+	env   *Env
 }
 
-func NewShellVariableResolver(env env.Env) VariableResolver {
+func NewShellVariableResolver(env *Env) VariableResolver {
 	return &shellVariableResolver{
 		env: env,
-		shell: shell.NewShell(
-			&shell.Options{
+		shell: NewShellExecutor(
+			&ShellOptions{
 				Env: env.Env(),
 			},
 		),
@@ -152,10 +149,10 @@ func (r *shellVariableResolver) ResolveValue(value string) (string, error) {
 }
 
 type environmentVariableResolver struct {
-	env env.Env
+	env *Env
 }
 
-func NewEnvironmentVariableResolver(env env.Env) VariableResolver {
+func NewEnvironmentVariableResolver(env *Env) VariableResolver {
 	return &environmentVariableResolver{
 		env: env,
 	}

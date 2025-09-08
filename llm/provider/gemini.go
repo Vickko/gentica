@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
-	"gentica/llm"       // for config
+	"gentica/config"
 	"gentica/llm/tools"
 	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/log"
@@ -43,11 +43,18 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 }
 
 func createGeminiClient(opts providerClientOptions) (*genai.Client, error) {
+	// 如果有自定义的 baseURL，设置它
+	if opts.baseURL != "" {
+		genai.SetDefaultBaseURLs(genai.BaseURLParameters{
+			GeminiURL: opts.baseURL,
+		})
+	}
+
 	cc := &genai.ClientConfig{
 		APIKey:  opts.apiKey,
 		Backend: genai.BackendGeminiAPI,
 	}
-	if llm.Get().Options.Debug {
+	if config.Get().Options.Debug {
 		cc.HTTPClient = &http.Client{}
 	}
 	client, err := genai.NewClient(context.Background(), cc)
@@ -143,6 +150,10 @@ func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Cont
 }
 
 func (g *geminiClient) convertTools(tools []tools.BaseTool) []*genai.Tool {
+	if len(tools) == 0 {
+		return nil
+	}
+	
 	geminiTool := &genai.Tool{}
 	geminiTool.FunctionDeclarations = make([]*genai.FunctionDeclaration, 0, len(tools))
 
@@ -179,11 +190,11 @@ func (g *geminiClient) send(ctx context.Context, messages []message.Message, too
 	// Convert messages
 	geminiMessages := g.convertMessages(messages)
 	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := llm.Get()
+	cfg := config.Get()
 
-	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == llm.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
 	maxTokens := model.DefaultMaxTokens
@@ -275,11 +286,11 @@ func (g *geminiClient) stream(ctx context.Context, messages []message.Message, t
 	geminiMessages := g.convertMessages(messages)
 
 	model := g.providerOptions.model(g.providerOptions.modelType)
-	cfg := llm.Get()
+	cfg := config.Get()
 
-	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
-	if g.providerOptions.modelType == llm.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if g.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 	maxTokens := model.DefaultMaxTokens
 	if modelConfig.MaxTokens > 0 {
@@ -435,7 +446,7 @@ func (g *geminiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 
 	// Check for token expiration (401 Unauthorized)
 	if contains(errMsg, "unauthorized", "invalid api key", "api key expired") {
-		g.providerOptions.apiKey, err = llm.Get().Resolve(g.providerOptions.config.APIKey)
+		g.providerOptions.apiKey, err = config.Get().Resolve(g.providerOptions.config.APIKey)
 		if err != nil {
 			return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 		}

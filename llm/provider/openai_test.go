@@ -6,12 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
-	"gentica/llm" // for config
+	"gentica/config"
 	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/message"
 	"github.com/openai/openai-go"
@@ -19,11 +20,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Skip config initialization in test
-	// _, err := config.Init(".", "", true)
-	// if err != nil {
-	//	panic("Failed to initialize config: " + err.Error())
-	// }
+	// 由于 instance 是 private 的，我们需要通过 Init 来设置
+	tempDir, _ := os.MkdirTemp("", "provider-test-*")
+	defer os.RemoveAll(tempDir)
+	
+	// 创建空配置文件并初始化
+	configFile := filepath.Join(tempDir, ".gentica.json")
+	os.WriteFile(configFile, []byte("{}"), 0644)
+	config.Init(tempDir, tempDir, false)
 
 	os.Exit(m.Run())
 }
@@ -54,10 +58,10 @@ func TestOpenAIClientStreamChoices(t *testing.T) {
 	// Create OpenAI client pointing to our mock server
 	client := &openaiClient{
 		providerOptions: providerClientOptions{
-			modelType:     llm.SelectedModelTypeLarge,
+			modelType:     config.SelectedModelTypeLarge,
 			apiKey:        "test-key",
 			systemMessage: "test",
-			model: func(llm.SelectedModelType) catwalk.Model {
+			model: func(config.SelectedModelType) catwalk.Model {
 				return catwalk.Model{
 					ID:   "test-model",
 					Name: "test-model",

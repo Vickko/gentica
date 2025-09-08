@@ -5,16 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"gentica/llm"
 	"gentica/llm/tools"
 	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/message"
-	// "github.com/charmbracelet/crush/internal/session"
+	"gentica/session"
 )
 
 type agentTool struct {
 	agent    Service
-	sessions llm.SessionService
+	sessions session.Service
 	messages message.Service
 }
 
@@ -88,7 +87,7 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 
 	parentSession.Cost += updatedSession.Cost
 
-	err = b.sessions.Save(ctx, parentSession)
+	_, err = b.sessions.Save(ctx, parentSession)
 	if err != nil {
 		return tools.ToolResponse{}, fmt.Errorf("error saving parent session: %s", err)
 	}
@@ -97,7 +96,7 @@ func (b *agentTool) Run(ctx context.Context, call tools.ToolCall) (tools.ToolRes
 
 func NewAgentTool(
 	agent Service,
-	sessions llm.SessionService,
+	sessions session.Service,
 	messages message.Service,
 ) tools.BaseTool {
 	return &agentTool{

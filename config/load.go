@@ -13,11 +13,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
-	"github.com/charmbracelet/crush/internal/fsext"
-	"github.com/charmbracelet/crush/internal/home"
-	"github.com/charmbracelet/crush/internal/log"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -60,7 +55,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 
 	// Setup logs
-	log.Setup(
+	SetupLog(
 		filepath.Join(cfg.Options.DataDirectory, "logs", fmt.Sprintf("%s.log", appName)),
 		cfg.Options.Debug,
 	)
@@ -72,7 +67,7 @@ func Load(workingDir, dataDir string, debug bool) (*Config, error) {
 	}
 	cfg.knownProviders = providers
 
-	env := env.New()
+	env := NewEnv()
 	// Configure providers
 	valueResolver := NewShellVariableResolver(env)
 	cfg.resolver = valueResolver
@@ -120,7 +115,7 @@ func PushPopCrushEnv() func() {
 	return restore
 }
 
-func (c *Config) configureProviders(env env.Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
+func (c *Config) configureProviders(env *Env, resolver VariableResolver, knownProviders []catwalk.Provider) error {
 	knownProviderNames := make(map[string]bool)
 	restore := PushPopCrushEnv()
 	defer restore()
@@ -314,14 +309,14 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 	if dataDir != "" {
 		c.Options.DataDirectory = dataDir
 	} else if c.Options.DataDirectory == "" {
-		if path, ok := fsext.SearchParent(workingDir, defaultDataDirectory); ok {
+		if path, ok := SearchParent(workingDir, defaultDataDirectory); ok {
 			c.Options.DataDirectory = path
 		} else {
 			c.Options.DataDirectory = filepath.Join(workingDir, defaultDataDirectory)
 		}
 	}
 	if c.Providers == nil {
-		c.Providers = csync.NewMap[string, ProviderConfig]()
+		c.Providers = NewSyncMap[string, ProviderConfig]()
 	}
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
@@ -542,13 +537,13 @@ func loadFromReaders(readers []io.Reader) (*Config, error) {
 	return LoadReader(merged)
 }
 
-func hasVertexCredentials(env env.Env) bool {
+func hasVertexCredentials(env *Env) bool {
 	hasProject := env.Get("VERTEXAI_PROJECT") != ""
 	hasLocation := env.Get("VERTEXAI_LOCATION") != ""
 	return hasProject && hasLocation
 }
 
-func hasAWSCredentials(env env.Env) bool {
+func hasAWSCredentials(env *Env) bool {
 	if env.Get("AWS_ACCESS_KEY_ID") != "" && env.Get("AWS_SECRET_ACCESS_KEY") != "" {
 		return true
 	}
@@ -585,7 +580,7 @@ func globalConfig() string {
 		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
 	}
 
-	return filepath.Join(home.Dir(), ".config", appName, fmt.Sprintf("%s.json", appName))
+	return filepath.Join(HomeDir(), ".config", appName, fmt.Sprintf("%s.json", appName))
 }
 
 // GlobalConfigData returns the path to the main data directory for the application.
@@ -607,5 +602,5 @@ func GlobalConfigData() string {
 		return filepath.Join(localAppData, appName, fmt.Sprintf("%s.json", appName))
 	}
 
-	return filepath.Join(home.Dir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
+	return filepath.Join(HomeDir(), ".local", "share", appName, fmt.Sprintf("%s.json", appName))
 }

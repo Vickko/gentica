@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
-	"gentica/llm"       // for config
+	"gentica/config"
 	"gentica/llm/tools"
 	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/log"
@@ -45,13 +45,13 @@ func createOpenAIClient(opts providerClientOptions) openai.Client {
 		openaiClientOptions = append(openaiClientOptions, option.WithAPIKey(opts.apiKey))
 	}
 	if opts.baseURL != "" {
-		resolvedBaseURL, err := llm.Get().Resolve(opts.baseURL)
+		resolvedBaseURL, err := config.Get().Resolve(opts.baseURL)
 		if err == nil && resolvedBaseURL != "" {
 			openaiClientOptions = append(openaiClientOptions, option.WithBaseURL(resolvedBaseURL))
 		}
 	}
 
-	if llm.Get().Options.Debug {
+	if config.Get().Options.Debug {
 		httpClient := &http.Client{}
 		openaiClientOptions = append(openaiClientOptions, option.WithHTTPClient(httpClient))
 	}
@@ -220,11 +220,11 @@ func (o *openaiClient) finishReason(reason string) message.FinishReason {
 
 func (o *openaiClient) preparedParams(messages []openai.ChatCompletionMessageParamUnion, tools []openai.ChatCompletionToolParam) openai.ChatCompletionNewParams {
 	model := o.providerOptions.model(o.providerOptions.modelType)
-	cfg := llm.Get()
+	cfg := config.Get()
 
-	modelConfig := cfg.Models[llm.SelectedModelTypeLarge]
-	if o.providerOptions.modelType == llm.SelectedModelTypeSmall {
-		modelConfig = cfg.Models[llm.SelectedModelTypeSmall]
+	modelConfig := cfg.Models[config.SelectedModelTypeLarge]
+	if o.providerOptions.modelType == config.SelectedModelTypeSmall {
+		modelConfig = cfg.Models[config.SelectedModelTypeSmall]
 	}
 
 	reasoningEffort := modelConfig.ReasoningEffort
@@ -506,7 +506,7 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 	if errors.As(err, &apiErr) {
 		// Check for token expiration (401 Unauthorized)
 		if apiErr.StatusCode == 401 {
-			o.providerOptions.apiKey, err = llm.Get().Resolve(o.providerOptions.config.APIKey)
+			o.providerOptions.apiKey, err = config.Get().Resolve(o.providerOptions.config.APIKey)
 			if err != nil {
 				return false, 0, fmt.Errorf("failed to resolve API key: %w", err)
 			}

@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/csync"
-	"github.com/charmbracelet/crush/internal/env"
 	"github.com/tidwall/sjson"
 )
 
@@ -196,7 +194,7 @@ func (m MCPConfig) ResolvedEnv() []string {
 }
 
 func (m MCPConfig) ResolvedHeaders() map[string]string {
-	resolver := NewShellVariableResolver(env.New())
+	resolver := NewShellVariableResolver(NewEnv())
 	for e, v := range m.Headers {
 		var err error
 		m.Headers[e], err = resolver.ResolveValue(v)
@@ -243,7 +241,7 @@ type Config struct {
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 
 	// The providers that are configured
-	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
+	Providers *SyncMap[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 
@@ -502,7 +500,7 @@ func (c *ProviderConfig) TestConnection(resolver VariableResolver) error {
 }
 
 func resolveEnvs(envs map[string]string) []string {
-	resolver := NewShellVariableResolver(env.New())
+	resolver := NewShellVariableResolver(NewEnv())
 	for e, v := range envs {
 		var err error
 		envs[e], err = resolver.ResolveValue(v)

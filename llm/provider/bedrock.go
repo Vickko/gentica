@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	// "github.com/charmbracelet/crush/internal/config"
-	"gentica/llm"       // for config
+	"gentica/config"
 	"gentica/llm/tools"
 	"gentica/message"
 	// "github.com/charmbracelet/crush/internal/message"
@@ -34,14 +34,17 @@ func newBedrockClient(opts providerClientOptions) BedrockClient {
 		}
 	}
 
-	opts.model = func(modelType llm.SelectedModelType) catwalk.Model {
-		model := llm.Get().GetModelByType(modelType)
+	opts.model = func(modelType config.SelectedModelType) catwalk.Model {
+		model := config.Get().GetModelByType(modelType)
+		if model == nil {
+			return catwalk.Model{}
+		}
 
 		// Prefix the model name with region
 		regionPrefix := region[:2]
 		modelName := model.ID
 		model.ID = fmt.Sprintf("%s.%s", regionPrefix, modelName)
-		return model
+		return *model
 	}
 
 	model := opts.model(opts.modelType)

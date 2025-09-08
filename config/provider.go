@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
-	"github.com/charmbracelet/crush/internal/home"
 )
 
 type ProviderClient interface {
@@ -42,7 +41,7 @@ func providerCacheFileData() string {
 		return filepath.Join(localAppData, appName, "providers.json")
 	}
 
-	return filepath.Join(home.Dir(), ".local", "share", appName, "providers.json")
+	return filepath.Join(HomeDir(), ".local", "share", appName, "providers.json")
 }
 
 func saveProvidersInCache(path string, providers []catwalk.Provider) error {
