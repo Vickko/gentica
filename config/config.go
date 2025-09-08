@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/tidwall/sjson"
+	"gentica/csync"
 )
 
 const (
@@ -218,6 +219,10 @@ type Agent struct {
 	// The available tools for the agent
 	//  if this is nil, all tools are available
 	AllowedTools []string `json:"allowed_tools,omitempty"`
+	
+	// The list of other agents this agent can call
+	//  if this is nil or empty, this agent cannot call other agents
+	AllowedAgents []string `json:"allowed_agents,omitempty"`
 
 	// this tells us which MCPs are available for this agent
 	//  if this is empty all mcps are available
@@ -241,7 +246,7 @@ type Config struct {
 	Models map[SelectedModelType]SelectedModel `json:"models,omitempty" jsonschema:"description=Model configurations for different model types,example={\"large\":{\"model\":\"gpt-4o\",\"provider\":\"openai\"}}"`
 
 	// The providers that are configured
-	Providers *SyncMap[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
+	Providers *csync.Map[string, ProviderConfig] `json:"providers,omitempty" jsonschema:"description=AI provider configurations"`
 
 	MCP MCPs `json:"mcp,omitempty" jsonschema:"description=Model Context Protocol server configurations"`
 

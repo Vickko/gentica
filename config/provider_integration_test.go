@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gentica/csync"
 )
 
 // TestProviderIntegrationReal 测试真实的 Provider 集成
@@ -237,7 +238,7 @@ func mergeConfigs(base, override map[string]interface{}) map[string]interface{} 
 
 // TestProviderSyncMap 测试线程安全的 SyncMap
 func TestProviderSyncMap(t *testing.T) {
-	sm := NewSyncMap[string, ProviderConfig]()
+	sm := csync.NewMap[string, ProviderConfig]()
 
 	// 测试基本操作
 	provider1 := ProviderConfig{
@@ -274,20 +275,21 @@ func TestProviderSyncMap(t *testing.T) {
 	sm.Set("p3", ProviderConfig{ID: "p3"})
 	assert.Equal(t, 3, sm.Len())
 	
-	// 测试 Range
+	// 测试 Seq2 迭代
 	count := 0
-	sm.Range(func(key string, value ProviderConfig) bool {
+	for _, _ = range sm.Seq2() {
 		count++
-		return true // 继续迭代
-	})
+	}
 	assert.Equal(t, 3, count)
 	
 	// 测试提前终止迭代
 	count = 0
-	sm.Range(func(key string, value ProviderConfig) bool {
+	for _, _ = range sm.Seq2() {
 		count++
-		return count < 2 // 只迭代2次
-	})
+		if count >= 2 {
+			break // 只迭代2次
+		}
+	}
 	assert.Equal(t, 2, count)
 }
 
@@ -437,7 +439,7 @@ func TestProviderModelSelection(t *testing.T) {
 				ReasoningEffort: "high",
 			},
 		},
-		Providers: NewSyncMapFrom(map[string]ProviderConfig{
+		Providers: csync.NewMapFrom(map[string]ProviderConfig{
 			"anthropic": {
 				ID:   "anthropic",
 				Name: "Anthropic",

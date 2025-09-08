@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gentica/csync"
 )
 
 // TestProviderConnectionOpenAI 测试 OpenAI Provider 连接
@@ -553,7 +554,7 @@ func TestProviderAPIKeyManagement(t *testing.T) {
 	// 创建配置实例
 	cfg := &Config{
 		dataConfigDir: configPath,
-		Providers:     NewSyncMap[string, ProviderConfig](),
+		Providers:     csync.NewMap[string, ProviderConfig](),
 		knownProviders: []catwalk.Provider{
 			{
 				ID:          "openai",

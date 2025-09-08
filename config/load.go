@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/catwalk/pkg/catwalk"
+	"gentica/csync"
 )
 
 const defaultCatwalkURL = "https://catwalk.charm.sh"
@@ -316,7 +317,7 @@ func (c *Config) setDefaults(workingDir, dataDir string) {
 		}
 	}
 	if c.Providers == nil {
-		c.Providers = NewSyncMap[string, ProviderConfig]()
+		c.Providers = csync.NewMap[string, ProviderConfig]()
 	}
 	if c.Models == nil {
 		c.Models = make(map[SelectedModelType]SelectedModel)
