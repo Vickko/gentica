@@ -349,12 +349,12 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 		}
 		slog.Debug("Request completed", "sessionID", sessionID)
 		a.activeRequests.Del(sessionID)
-		cancel()
 		a.Publish(pubsub.CreatedEvent, result)
 		select {
 		case events <- result:
 		case <-genCtx.Done():
 		}
+		cancel()
 		close(events)
 	}()
 	return events, nil

@@ -93,7 +93,7 @@ func init() {
 // TestSimpleAgentChat 测试简单的 agent 对话 - 使用真实服务
 func TestSimpleAgentChat(t *testing.T) {
 	if testing.Short() {
-		t.Skip("跳过集成测试")
+		t.Skip("跳过集成测试12")
 	}
 
 	// 清理函数
