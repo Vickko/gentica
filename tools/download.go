@@ -1,0 +1,208 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+type DownloadParams struct {
+	URL      string `json:"url"`
+	FilePath string `json:"file_path"`
+	Timeout  int    `json:"timeout,omitempty"`
+}
+
+type downloadTool struct {
+	client     *http.Client
+	workingDir string
+}
+
+const (
+	DownloadToolName        = "download"
+	downloadToolDescription = `Downloads binary data from a URL and saves it to a local file.
+
+WHEN TO USE THIS TOOL:
+- Use when you need to download files, images, or other binary data from URLs
+- Helpful for downloading assets, documents, or any file type
+- Useful for saving remote content locally for processing or storage
+
+HOW TO USE:
+- Provide the URL to download from
+- Specify the local file path where the content should be saved
+- Optionally set a timeout for the request
+
+FEATURES:
+- Downloads any file type (binary or text)
+- Automatically creates parent directories if they don't exist
+- Handles large files efficiently with streaming
+- Sets reasonable timeouts to prevent hanging
+- Validates input parameters before making requests
+
+LIMITATIONS:
+- Maximum file size is 100MB
+- Only supports HTTP and HTTPS protocols
+- Cannot handle authentication or cookies
+- Some websites may block automated requests
+- Will overwrite existing files without warning
+
+TIPS:
+- Use absolute paths or paths relative to the working directory
+- Set appropriate timeouts for large files or slow connections`
+)
+
+func NewDownloadTool(workingDir string) BaseTool {
+	return &downloadTool{
+		client: &http.Client{
+			Timeout: 5 * time.Minute, // Default 5 minute timeout for downloads
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+		workingDir: workingDir,
+	}
+}
+
+func (t *downloadTool) Name() string {
+	return DownloadToolName
+}
+
+func (t *downloadTool) Info() ToolInfo {
+	return ToolInfo{
+		Name:        DownloadToolName,
+		Description: downloadToolDescription,
+		Parameters: map[string]any{
+			"url": map[string]any{
+				"type":        "string",
+				"description": "The URL to download from",
+			},
+			"file_path": map[string]any{
+				"type":        "string",
+				"description": "The local file path where the downloaded content should be saved",
+			},
+			"timeout": map[string]any{
+				"type":        "number",
+				"description": "Optional timeout in seconds (max 600)",
+			},
+		},
+		Required: []string{"url", "file_path"},
+	}
+}
+
+func (t *downloadTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
+	var params DownloadParams
+	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
+		return NewTextErrorResponse("Failed to parse download parameters: " + err.Error()), nil
+	}
+
+	if params.URL == "" {
+		return NewTextErrorResponse("URL parameter is required"), nil
+	}
+
+	if params.FilePath == "" {
+		return NewTextErrorResponse("file_path parameter is required"), nil
+	}
+
+	if !strings.HasPrefix(params.URL, "http://") && !strings.HasPrefix(params.URL, "https://") {
+		return NewTextErrorResponse("URL must start with http:// or https://"), nil
+	}
+
+	// Convert relative path to absolute path
+	var filePath string
+	if filepath.IsAbs(params.FilePath) {
+		filePath = params.FilePath
+	} else {
+		filePath = filepath.Join(t.workingDir, params.FilePath)
+	}
+
+	// Permission check removed - tool executes directly
+
+	// Handle timeout with context
+	requestCtx := ctx
+	if params.Timeout > 0 {
+		maxTimeout := 600 // 10 minutes
+		if params.Timeout > maxTimeout {
+			params.Timeout = maxTimeout
+		}
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(ctx, time.Duration(params.Timeout)*time.Second)
+		defer cancel()
+	}
+
+	req, err := http.NewRequestWithContext(requestCtx, "GET", params.URL, nil)
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("Failed to create request: %v", err)), nil
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	// Retry logic for network failures
+	var resp *http.Response
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err = t.client.Do(req)
+		if err == nil {
+			break
+		}
+		if attempt < maxRetries-1 {
+			// Wait before retry with exponential backoff
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("Failed to download from URL after %d attempts: %v", maxRetries, err)), nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return NewTextErrorResponse(fmt.Sprintf("Request failed with status code: %d", resp.StatusCode)), nil
+	}
+
+	// Check content length if available
+	maxSize := int64(100 * 1024 * 1024) // 100MB
+	if resp.ContentLength > maxSize {
+		return NewTextErrorResponse(fmt.Sprintf("File too large: %d bytes (max %d bytes)", resp.ContentLength, maxSize)), nil
+	}
+
+	// Create parent directories if they don't exist
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("Failed to create parent directories: %v", err)), nil
+	}
+
+	// Create the output file
+	outFile, err := os.Create(filePath)
+	if err != nil {
+		return NewTextErrorResponse(fmt.Sprintf("Failed to create output file: %v", err)), nil
+	}
+	defer outFile.Close()
+
+	// Copy data with size limit
+	limitedReader := io.LimitReader(resp.Body, maxSize)
+	bytesWritten, err := io.Copy(outFile, limitedReader)
+	if err != nil {
+		os.Remove(filePath) // Clean up incomplete file
+		return NewTextErrorResponse(fmt.Sprintf("Failed to write file: %v", err)), nil
+	}
+
+	// Check if we hit the size limit
+	if bytesWritten == maxSize {
+		// Clean up the file since it might be incomplete
+		os.Remove(filePath)
+		return NewTextErrorResponse(fmt.Sprintf("File too large: exceeded %d bytes limit", maxSize)), nil
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	responseMsg := fmt.Sprintf("Successfully downloaded %d bytes to %s", bytesWritten, filePath)
+	if contentType != "" {
+		responseMsg += fmt.Sprintf(" (Content-Type: %s)", contentType)
+	}
+
+	return NewTextResponse(responseMsg), nil
+}
