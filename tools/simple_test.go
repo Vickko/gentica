@@ -168,13 +168,13 @@ func TestBasicTools(t *testing.T) {
 		}
 	})
 
-	t.Run("TestLsTool_ListDirectory", func(t *testing.T) {
+	t.Run("TestTreeTool_ListDirectory", func(t *testing.T) {
 		// Create test structure
 		os.Mkdir(filepath.Join(tempDir, "testdir"), 0755)
 		os.WriteFile(filepath.Join(tempDir, "testfile.txt"), []byte("test"), 0644)
 
-		lsTool := NewLsTool(tempDir)
-		params := LSParams{
+		treeTool := NewTreeTool(tempDir)
+		params := TreeParams{
 			Path: tempDir,
 		}
 		paramsJSON, err := json.Marshal(params)
@@ -183,12 +183,12 @@ func TestBasicTools(t *testing.T) {
 		}
 
 		call := ToolCall{Input: string(paramsJSON)}
-		response, err := lsTool.Run(context.Background(), call)
+		response, err := treeTool.Run(context.Background(), call)
 		if err != nil {
 			t.Fatalf("Failed to list directory: %v", err)
 		}
 		if response.IsError {
-			t.Fatalf("LS failed: %s", response.Content)
+			t.Fatalf("Tree failed: %s", response.Content)
 		}
 		if !strings.Contains(response.Content, "testdir") {
 			t.Errorf("Expected 'testdir' in output, got: %s", response.Content)

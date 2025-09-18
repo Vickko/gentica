@@ -55,7 +55,7 @@ WINDOWS NOTES:
 
 TIPS:
 - Use the View tool first to examine existing files before modifying them
-- Use the LS tool to verify the correct location when creating new files
+- Use the Tree tool to verify the correct location when creating new files
 - Combine with Glob and Grep tools to find and modify multiple files
 - Always include descriptive comments when making changes to existing code`
 )

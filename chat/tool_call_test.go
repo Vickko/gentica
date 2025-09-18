@@ -237,9 +237,9 @@ func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	workingDir, err := os.Getwd()
 	require.NoError(t, err)
 
-	// 创建 ls 工具
-	lsTool := tools.NewLsTool(workingDir)
-	genkitLsTool := tools.AdaptBaseToolToGenkit(g, lsTool)
+	// 创建 tree 工具
+	treeTool := tools.NewTreeTool(workingDir)
+	genkitTreeTool := tools.AdaptBaseToolToGenkit(g, treeTool)
 
 	// 复用日志中间件
 	loggingMiddleware := createConversationLogger(t)
@@ -257,8 +257,8 @@ func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	for round := 1; round <= maxRounds; round++ {
 		response, err := genkit.Generate(ctx, g,
 			ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
-			ai.WithSystem("你是文件系统助手，请使用ls工具完成任务。"),
-			ai.WithTools(genkitLsTool),
+			ai.WithSystem("你是文件系统助手，请使用tree工具完成任务。"),
+			ai.WithTools(genkitTreeTool),
 			ai.WithMessages(messages...),
 			ai.WithMiddleware(loggingMiddleware),
 		)

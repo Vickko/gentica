@@ -145,21 +145,21 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 
 	// Execute command
 	startTime := time.Now().UnixMilli()
-	
+
 	// Use sh -c to execute the command in a shell
 	cmd := exec.CommandContext(cmdCtx, "sh", "-c", params.Command)
 	cmd.Dir = b.workingDir
-	
+
 	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
+
 	// Run the command
 	err := cmd.Run()
-	
+
 	endTime := time.Now().UnixMilli()
-	
+
 	// Combine output
 	output := stdout.String()
 	if stderr.Len() > 0 {
@@ -168,17 +168,17 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 		}
 		output += stderr.String()
 	}
-	
+
 	// Truncate if too long
 	if len(output) > MaxOutputLength {
 		output = output[:MaxOutputLength] + "\n... (output truncated)"
 	}
-	
+
 	// Handle empty output
 	if output == "" {
 		output = BashNoOutput
 	}
-	
+
 	// Check for timeout
 	if cmdCtx.Err() == context.DeadlineExceeded {
 		return WithResponseMetadata(
@@ -191,7 +191,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 			},
 		), nil
 	}
-	
+
 	// Get exit code
 	exitCode := 0
 	if err != nil {
@@ -201,7 +201,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 			return ToolResponse{}, fmt.Errorf("failed to execute command: %w", err)
 		}
 	}
-	
+
 	// Format result - non-zero exit code is considered an error
 	if exitCode != 0 {
 		result := fmt.Sprintf("%s\n\nExit code: %d", output, exitCode)
@@ -215,7 +215,7 @@ func (b *bashTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error)
 			},
 		), nil
 	}
-	
+
 	return WithResponseMetadata(
 		NewTextResponse(output),
 		BashResponseMetadata{
