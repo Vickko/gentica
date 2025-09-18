@@ -15,8 +15,8 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-// Example_BasicAgent 展示如何创建和使用基本 Agent
-func Example_BasicAgent() {
+// ExampleNewSimpleAgent 展示如何创建和使用基本 Agent
+func ExampleNewSimpleAgent() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -47,8 +47,8 @@ func Example_BasicAgent() {
 	fmt.Println("Answer:", result)
 }
 
-// Example_AgentWithSchema 展示如何创建带输入 schema 的 Agent
-func Example_AgentWithSchema() {
+// ExampleNewBuilder 展示如何创建带输入 schema 的 Agent
+func ExampleNewBuilder() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -101,8 +101,8 @@ func Example_AgentWithSchema() {
 	fmt.Println("Translation:", result)
 }
 
-// Example_AgentAsToolInAnotherAgent 展示如何将 Agent 作为工具在另一个 Agent 中使用
-func Example_AgentAsToolInAnotherAgent() {
+// ExampleAsToolAdapter 展示如何将 Agent 作为工具在另一个 Agent 中使用
+func ExampleAsToolAdapter() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -158,8 +158,8 @@ func Example_AgentAsToolInAnotherAgent() {
 	fmt.Println("Result:", result)
 }
 
-// Example_AgentChain 展示如何串行执行多个 Agent
-func Example_AgentChain() {
+// ExampleNewAgentChain 展示如何串行执行多个 Agent
+func ExampleNewAgentChain() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -218,8 +218,8 @@ func Example_AgentChain() {
 	fmt.Println("Processed result:", result)
 }
 
-// Example_AgentPool 展示如何并行执行多个 Agent
-func Example_AgentPool() {
+// ExampleNewAgentPool 展示如何并行执行多个 Agent
+func ExampleNewAgentPool() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -276,8 +276,8 @@ func Example_AgentPool() {
 	}
 }
 
-// Example_MessageManagement 展示如何管理 Agent 的消息历史
-func Example_MessageManagement() {
+// ExampleAgent_ClearHistory 展示如何管理 Agent 的消息历史
+func ExampleAgent_ClearHistory() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
@@ -326,8 +326,8 @@ func Example_MessageManagement() {
 	fmt.Println("After clearing history:", response)
 }
 
-// Example_AgentRouter 展示如何根据条件路由到不同的 Agent
-func Example_AgentRouter() {
+// ExampleNewAgentRouter 展示如何根据条件路由到不同的 Agent
+func ExampleNewAgentRouter() {
 	// 初始化 Genkit
 	oai := &openai.OpenAI{
 		APIKey: "your-api-key",
