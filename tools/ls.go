@@ -10,19 +10,12 @@ import (
 	"strings"
 )
 
-type LSParams struct {
-	Path   string   `json:"path"`
-	Ignore []string `json:"ignore"`
+type LsParams struct {
+	Path string `json:"path"`
+	All  bool   `json:"all"` // Show hidden files (like ls -a)
 }
 
-type TreeNode struct {
-	Name     string      `json:"name"`
-	Path     string      `json:"path"`
-	Type     string      `json:"type"` // "file" or "directory"
-	Children []*TreeNode `json:"children,omitempty"`
-}
-
-type LSResponseMetadata struct {
+type LsResponseMetadata struct {
 	NumberOfFiles int  `json:"number_of_files"`
 	Truncated     bool `json:"truncated"`
 }
@@ -32,42 +25,37 @@ type lsTool struct {
 }
 
 const (
-	LSToolName    = "ls"
-	MaxLSFiles    = 1000
-	lsDescription = `Directory listing tool that shows files and subdirectories in a tree structure, helping you explore and understand the project organization.
+	LsToolName    = "ls"
+	MaxLsFiles    = 512
+	lsDescription = `List directory contents, similar to Unix ls command.
 
 WHEN TO USE THIS TOOL:
-- Use when you need to explore the structure of a directory
-- Helpful for understanding the organization of a project
-- Good first step when getting familiar with a new codebase
+- Use when you need to see what files and directories are in a specific location
+- Quick overview of directory contents without hierarchical structure
+- Good for checking if specific files exist in a directory
+- Use instead of tree when you only need immediate children
 
 HOW TO USE:
 - Provide a path to list (defaults to current working directory)
-- Optionally specify glob patterns to ignore
-- Results are displayed in a tree structure
+- Use all=true to show hidden files and directories (starting with '.')
 
 FEATURES:
-- Displays a hierarchical view of files and directories
-- Automatically skips hidden files/directories (starting with '.')
-- Skips common system directories like __pycache__
-- Can filter out files matching specific patterns
+- Lists files and directories in alphabetical order
+- Shows only immediate children (no recursion)
+- Directories are marked with trailing /
+- Hidden files (starting with '.') are hidden by default unless all=true
+- One item per line for simple parsing
 
 LIMITATIONS:
-- Results are limited to 1000 files
-- Very large directories will be truncated
-- Does not show file sizes or permissions
-- Cannot recursively list all directories in a large project
-
-WINDOWS NOTES:
-- Hidden file detection uses Unix convention (files starting with '.')
-- Windows-specific hidden files (with hidden attribute) are not automatically skipped
-- Common Windows directories like System32, Program Files are not in default ignore list
-- Path separators are handled automatically (both / and \ work)
+- Results are limited to 512 files
+- Does not show file sizes, permissions, or dates
+- No recursive listing (use tree tool for hierarchical view)
+- No filtering options beyond hidden files
 
 TIPS:
-- Use Glob tool for finding files by name patterns instead of browsing
-- Use Grep tool for searching file contents
-- Combine with other tools for more effective exploration`
+- Use tree tool for hierarchical directory structure
+- Use glob tool for pattern-based file searching
+- Use grep tool for searching file contents`
 )
 
 func NewLsTool(workingDir string) BaseTool {
@@ -77,24 +65,21 @@ func NewLsTool(workingDir string) BaseTool {
 }
 
 func (l *lsTool) Name() string {
-	return LSToolName
+	return LsToolName
 }
 
 func (l *lsTool) Info() ToolInfo {
 	return ToolInfo{
-		Name:        LSToolName,
+		Name:        LsToolName,
 		Description: lsDescription,
 		Parameters: map[string]any{
 			"path": map[string]any{
 				"type":        "string",
 				"description": "The path to the directory to list (defaults to current working directory)",
 			},
-			"ignore": map[string]any{
-				"type":        "array",
-				"description": "List of glob patterns to ignore",
-				"items": map[string]any{
-					"type": "string",
-				},
+			"all": map[string]any{
+				"type":        "boolean",
+				"description": "Show all files including hidden ones (default: false)",
 			},
 		},
 		Required: []string{},
@@ -102,7 +87,7 @@ func (l *lsTool) Info() ToolInfo {
 }
 
 func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
-	var params LSParams
+	var params LsParams
 	if err := json.Unmarshal([]byte(call.Input), &params); err != nil {
 		return NewTextErrorResponse(fmt.Sprintf("invalid parameters: %s", err)), nil
 	}
@@ -124,7 +109,7 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		searchPath = filepath.Join(l.workingDir, searchPath)
 	}
 
-	// Check if path is a directory
+	// Check if path exists and is a directory
 	info, err := os.Stat(searchPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -137,222 +122,77 @@ func (l *lsTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error) {
 		return NewTextErrorResponse(fmt.Sprintf("not a directory: %s", searchPath)), nil
 	}
 
-	output, fileCount, truncated, err := ListDirectoryTree(searchPath, params.Ignore)
+	output, metadata, err := ListDirectory(searchPath, params.All, MaxLsFiles)
 	if err != nil {
 		return NewTextErrorResponse(fmt.Sprintf("error listing directory: %s", err)), nil
 	}
 
 	return WithResponseMetadata(
 		NewTextResponse(output),
-		LSResponseMetadata{
-			NumberOfFiles: fileCount,
-			Truncated:     truncated,
-		},
+		metadata,
 	), nil
 }
 
-func ListDirectoryTree(searchPath string, ignore []string) (string, int, bool, error) {
-	files, truncated, err := listDirectory(searchPath, ignore, MaxLSFiles)
+func ListDirectory(searchPath string, showAll bool, maxFiles int) (string, LsResponseMetadata, error) {
+	entries, err := os.ReadDir(searchPath)
 	if err != nil {
-		return "", 0, false, fmt.Errorf("error listing directory: %w", err)
+		return "", LsResponseMetadata{}, fmt.Errorf("error reading directory: %w", err)
 	}
 
-	// Handle empty directory
-	if len(files) == 0 {
-		output := fmt.Sprintf("- %s%c\n  (empty)\n", searchPath, filepath.Separator)
-		return output, 0, false, nil
-	}
-
-	tree := createFileTree(files, searchPath)
-	output := printTree(tree, searchPath)
-
-	if truncated {
-		output = fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or use the Glob tool to find specific files. The first %d files and directories are included below:\n\n%s", MaxLSFiles, MaxLSFiles, output)
-	}
-
-	return output, len(files), truncated, nil
-}
-
-// listDirectory lists files in a directory, applying ignore patterns
-func listDirectory(rootPath string, ignorePatterns []string, maxFiles int) ([]string, bool, error) {
-	var results []string
+	// Filter and collect entries
+	var items []string
 	truncated := false
 	fileCount := 0
 
-	// Default ignore patterns
-	defaultIgnore := []string{
-		".*",           // Hidden files
-		"__pycache__",  // Python cache
-		"node_modules", // Node modules
-		".git",         // Git directory
-	}
+	for _, entry := range entries {
+		name := entry.Name()
 
-	allIgnorePatterns := append(defaultIgnore, ignorePatterns...)
-
-	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip files/dirs with errors
-		}
-
-		// Skip the root directory itself
-		if path == rootPath {
-			return nil
-		}
-
-		// Check ignore patterns
-		relPath, err := filepath.Rel(rootPath, path)
-		if err != nil {
-			relPath = path
-		}
-		baseName := filepath.Base(path)
-		
-		for _, pattern := range allIgnorePatterns {
-			var matched bool
-			
-			// Handle recursive patterns like "test/**"
-			if strings.Contains(pattern, "/**") {
-				prefix := strings.TrimSuffix(pattern, "/**")
-				if strings.HasPrefix(relPath, prefix+string(filepath.Separator)) || relPath == prefix {
-					matched = true
-				}
-			} else if strings.Contains(pattern, "**") {
-				// Handle general ** patterns
-				matched, _ = filepath.Match(pattern, relPath)
-				if !matched {
-					matched, _ = filepath.Match(pattern, baseName)
-				}
-			} else {
-				// Simple pattern matching on base name
-				matched, _ = filepath.Match(pattern, baseName)
-			}
-			
-			if matched {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
+		// Skip hidden files unless showAll is true
+		if !showAll && strings.HasPrefix(name, ".") {
+			continue
 		}
 
 		// Check if we've reached max files
 		if fileCount >= maxFiles {
 			truncated = true
-			return filepath.SkipAll
+			break
 		}
 
+		// Add directory marker
+		if entry.IsDir() {
+			name = name + "/"
+		}
+
+		items = append(items, name)
 		fileCount++
-		results = append(results, path)
-		return nil
-	})
-
-	if err != nil && err != filepath.SkipAll {
-		return nil, false, err
 	}
 
-	// Sort the results
-	sort.Strings(results)
+	// Sort items alphabetically
+	sort.Strings(items)
 
-	return results, truncated, nil
-}
+	// Build output
+	var output strings.Builder
 
-func createFileTree(sortedPaths []string, rootPath string) []*TreeNode {
-	root := []*TreeNode{}
-	pathMap := make(map[string]*TreeNode)
+	// Add warning if truncated
+	if truncated {
+		output.WriteString(fmt.Sprintf("There are more than %d files in the directory. Use a more specific path or filter files.\n\n", maxFiles))
+	}
 
-	for _, path := range sortedPaths {
-		relativePath := strings.TrimPrefix(path, rootPath)
-		parts := strings.Split(relativePath, string(filepath.Separator))
-		currentPath := ""
-		var parentPath string
-
-		var cleanParts []string
-		for _, part := range parts {
-			if part != "" {
-				cleanParts = append(cleanParts, part)
-			}
-		}
-		parts = cleanParts
-
-		if len(parts) == 0 {
-			continue
-		}
-
-		for i, part := range parts {
-			if currentPath == "" {
-				currentPath = part
-			} else {
-				currentPath = filepath.Join(currentPath, part)
-			}
-
-			if _, exists := pathMap[currentPath]; exists {
-				parentPath = currentPath
-				continue
-			}
-
-			// Check if it's a directory by checking if it exists as a directory
-			fullPath := filepath.Join(rootPath, currentPath)
-			info, err := os.Stat(fullPath)
-			isDir := err == nil && info.IsDir()
-			
-			nodeType := "file"
-			if isDir {
-				nodeType = "directory"
-			}
-			
-			newNode := &TreeNode{
-				Name:     part,
-				Path:     currentPath,
-				Type:     nodeType,
-				Children: []*TreeNode{},
-			}
-
-			pathMap[currentPath] = newNode
-
-			if i > 0 && parentPath != "" {
-				if parent, ok := pathMap[parentPath]; ok {
-					parent.Children = append(parent.Children, newNode)
-				}
-			} else {
-				root = append(root, newNode)
-			}
-
-			parentPath = currentPath
+	// Handle empty directory
+	if len(items) == 0 {
+		output.WriteString("(empty)\n")
+	} else {
+		// Write each item on its own line
+		for _, item := range items {
+			output.WriteString(item)
+			output.WriteString("\n")
 		}
 	}
 
-	return root
-}
-
-func printTree(tree []*TreeNode, rootPath string) string {
-	var result strings.Builder
-
-	result.WriteString("- ")
-	result.WriteString(rootPath)
-	if len(rootPath) > 0 && rootPath[len(rootPath)-1] != filepath.Separator {
-		result.WriteByte(filepath.Separator)
-	}
-	result.WriteByte('\n')
-
-	for _, node := range tree {
-		printNode(&result, node, 1)
+	metadata := LsResponseMetadata{
+		NumberOfFiles: fileCount,
+		Truncated:     truncated,
 	}
 
-	return result.String()
-}
-
-func printNode(builder *strings.Builder, node *TreeNode, level int) {
-	indent := strings.Repeat("  ", level)
-
-	nodeName := node.Name
-	if node.Type == "directory" {
-		nodeName = nodeName + string(filepath.Separator)
-	}
-
-	fmt.Fprintf(builder, "%s- %s\n", indent, nodeName)
-
-	if node.Type == "directory" && len(node.Children) > 0 {
-		for _, child := range node.Children {
-			printNode(builder, child, level+1)
-		}
-	}
+	return output.String(), metadata, nil
 }
