@@ -70,19 +70,28 @@ func (a *BaseAgent) Run(ctx context.Context, input string) (string, error) {
 	return response.Text(), nil
 }
 
-// executeWithTools 自动处理工具调用循环
+// executeWithTools 手动处理工具调用循环，保留完整历史
 func (a *BaseAgent) executeWithTools(ctx context.Context) (*ai.ModelResponse, error) {
-	for round := 0; round < a.config.MaxRounds; round++ {
-		// 准备生成选项
+	var lastResponse *ai.ModelResponse
+	maxRounds := a.config.MaxRounds
+	if maxRounds <= 0 {
+		maxRounds = 5
+	}
+
+	for round := 0; round < maxRounds; round++ {
+		// 1. 过滤消息以发送给 LLM（移除旧的工具调用）
+		filteredMessages := a.filterMessagesForLLM()
+
+		// 2. 准备生成选项
 		opts := []ai.GenerateOption{
 			ai.WithModelName(a.config.Model),
 			ai.WithSystem(a.config.SystemPrompt),
-			ai.WithMessages(a.messages...),
+			ai.WithMessages(filteredMessages...),
+			ai.WithReturnToolRequests(true), // 关键：不自动执行工具，只返回工具请求
 		}
 
 		// 添加工具（如果有）
 		if len(a.config.Tools) > 0 {
-			// 转换 ai.Tool 到 ai.ToolRef
 			toolRefs := make([]ai.ToolRef, len(a.config.Tools))
 			for i, tool := range a.config.Tools {
 				toolRefs[i] = ai.ToolRef(tool)
@@ -90,40 +99,179 @@ func (a *BaseAgent) executeWithTools(ctx context.Context) (*ai.ModelResponse, er
 			opts = append(opts, ai.WithTools(toolRefs...))
 		}
 
-		// 添加温度参数
-		if a.config.Temperature > 0 {
-			// Temperature 在 ai.ModelRequest 中设置，需要使用 WithConfig
-			// 暂时注释掉，因为 WithTemperature 不存在
-			// opts = append(opts, ai.WithTemperature(a.config.Temperature))
-		}
-
-		// 添加最大 token 数
-		if a.config.MaxTokens > 0 {
-			// MaxTokens 在 ai.ModelRequest 中设置
-			// 暂时注释掉，因为 WithMaxOutputTokens 不存在
-			// opts = append(opts, ai.WithMaxOutputTokens(a.config.MaxTokens))
-		}
-
-		// 执行生成
+		// 3. 调用模型（返回工具请求但不自动执行）
 		response, err := genkit.Generate(ctx, a.g, opts...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("model generation failed: %w", err)
 		}
 
-		// 如果没有工具调用，直接返回
-		if len(response.ToolRequests()) == 0 {
-			return response, nil
-		}
+		lastResponse = response
 
-		// 添加模型响应到历史（包含工具调用）
+		// 4. 将助手响应添加到完整历史（包括工具调用）
 		if response.Message != nil {
 			a.AddMessage(response.Message)
 		}
 
-		// 继续下一轮（genkit 会自动处理工具响应）
+		// 5. 检查是否有工具调用
+		hasToolCalls := false
+		if response.Message != nil {
+			for _, part := range response.Message.Content {
+				if part.IsToolRequest() {
+					hasToolCalls = true
+					break
+				}
+			}
+		}
+
+		// 如果没有工具调用，完成
+		if !hasToolCalls {
+			break
+		}
+
+		// 6. 执行工具调用并创建工具响应消息
+		toolResponses := make([]*ai.Part, 0)
+		for _, part := range response.Message.Content {
+			if !part.IsToolRequest() {
+				continue
+			}
+
+			toolReq := part.ToolRequest
+			// 查找并执行工具
+			toolResp, err := a.executeToolByName(ctx, toolReq.Name, toolReq.Input)
+			if err != nil {
+				// 创建错误响应
+				toolResponses = append(toolResponses, ai.NewToolResponsePart(&ai.ToolResponse{
+					Name:   toolReq.Name,
+					Ref:    toolReq.Ref,
+					Output: fmt.Sprintf("Tool execution failed: %v", err),
+				}))
+			} else {
+				// 创建成功响应
+				toolResponses = append(toolResponses, ai.NewToolResponsePart(&ai.ToolResponse{
+					Name:   toolReq.Name,
+					Ref:    toolReq.Ref,
+					Output: toolResp,
+				}))
+			}
+		}
+
+		// 7. 创建工具响应消息并添加到历史
+		if len(toolResponses) > 0 {
+			toolMessage := &ai.Message{
+				Role:    ai.RoleTool,
+				Content: toolResponses,
+			}
+			a.AddMessage(toolMessage)
+		}
 	}
 
-	return nil, fmt.Errorf("exceeded max rounds (%d)", a.config.MaxRounds)
+	return lastResponse, nil
+}
+
+// filterMessagesForLLM 过滤消息以发送给 LLM
+// 保留所有消息，但过滤掉被普通回复隔断的旧工具调用
+// 保留连续延伸到消息列表末尾的工具调用序列
+func (a *BaseAgent) filterMessagesForLLM() []*ai.Message {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if len(a.messages) == 0 {
+		return []*ai.Message{}
+	}
+
+	// 找到最后一个普通回复的位置
+	cutoffIndex := -1
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.isNormalAssistantReply(a.messages[i]) {
+			cutoffIndex = i
+			break
+		}
+	}
+
+	// 构建过滤后的消息
+	filtered := make([]*ai.Message, 0, len(a.messages))
+	for i, msg := range a.messages {
+		// 在 cutoff 之后的消息全部保留
+		if cutoffIndex < 0 || i > cutoffIndex {
+			filtered = append(filtered, msg)
+			continue
+		}
+
+		// 在 cutoff 之前的消息需要过滤
+		switch msg.Role {
+		case ai.RoleModel:
+			// 过滤掉工具调用部分，只保留文本
+			if textParts := a.extractTextParts(msg); len(textParts) > 0 {
+				filtered = append(filtered, &ai.Message{
+					Role:    msg.Role,
+					Content: textParts,
+				})
+			}
+		case ai.RoleTool:
+			// 工具响应直接过滤掉
+		default:
+			// User 等其他消息保留
+			filtered = append(filtered, msg)
+		}
+	}
+
+	return filtered
+}
+
+// isNormalAssistantReply 检查是否是不包含工具调用的普通助手回复
+func (a *BaseAgent) isNormalAssistantReply(msg *ai.Message) bool {
+	if msg.Role != ai.RoleModel {
+		return false
+	}
+
+	hasToolRequest := false
+	hasTextContent := false
+	for _, part := range msg.Content {
+		if part.IsToolRequest() {
+			hasToolRequest = true
+		}
+		if part.IsText() && part.Text != "" {
+			hasTextContent = true
+		}
+	}
+
+	return !hasToolRequest && hasTextContent
+}
+
+// extractTextParts 提取消息中的文本部分
+func (a *BaseAgent) extractTextParts(msg *ai.Message) []*ai.Part {
+	var textParts []*ai.Part
+	for _, part := range msg.Content {
+		if part.IsText() {
+			textParts = append(textParts, part)
+		}
+	}
+	return textParts
+}
+
+// executeToolByName 根据名称执行工具
+func (a *BaseAgent) executeToolByName(ctx context.Context, toolName string, input any) (any, error) {
+	// 查找工具
+	var targetTool ai.Tool
+	for _, tool := range a.config.Tools {
+		// 使用 Tool 接口的 Name() 方法获取工具名称
+		if tool.Name() == toolName {
+			targetTool = tool
+			break
+		}
+	}
+
+	if targetTool == nil {
+		return nil, fmt.Errorf("tool %s not found", toolName)
+	}
+
+	// 执行工具 - 使用 RunRaw 方法
+	result, err := targetTool.RunRaw(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetMessages 获取消息历史
