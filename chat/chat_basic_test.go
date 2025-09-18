@@ -18,15 +18,7 @@ var (
 	baseURL = "https://aihubmix.com/v1"
 )
 
-// WeatherResponse 天气响应结构体
-type WeatherResponse struct {
-	City        string `json:"city"`
-	Temperature string `json:"temperature"`
-	Weather     string `json:"weather"`
-}
-
 var g *genkit.Genkit
-var weatherTool ai.Tool
 
 func init() {
 	oai := &openai.OpenAI{
@@ -39,33 +31,6 @@ func init() {
 	g = genkit.Init(
 		context.Background(),
 		genkit.WithPlugins(oai),
-	)
-
-	// 定义 mock weather tool (使用 object schema)
-	inputSchema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"city": map[string]any{
-				"type":        "string",
-				"description": "要查询天气的城市名称",
-			},
-		},
-		"required": []string{"city"},
-	}
-
-	weatherTool = genkit.DefineToolWithInputSchema(g, "getWeather", "获取指定城市的天气信息", inputSchema,
-		func(ctx *ai.ToolContext, input any) (WeatherResponse, error) {
-			// 解析输入
-			data := input.(map[string]any)
-			city := data["city"].(string)
-
-			// 返回固定的假天气数据
-			return WeatherResponse{
-				City:        city,
-				Temperature: "25°C",
-				Weather:     "晴天",
-			}, nil
-		},
 	)
 }
 
@@ -126,30 +91,4 @@ func TestMultiTurnChatWithSystemPrompt(t *testing.T) {
 			t.Logf("  请求消息 %d [%s]: %s", i+1, msg.Role, msg.Text())
 		}
 	}
-}
-
-func TestWeatherTool(t *testing.T) {
-	ctx := context.Background()
-
-	// 测试使用 weather tool 查询天气
-	response, err := genkit.Generate(ctx, g,
-		ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
-		ai.WithSystem("你是天气助手，使用getWeather工具查询天气并用中文回复。"),
-		ai.WithTools(weatherTool),
-		ai.WithPrompt("北京今天天气怎么样？"),
-	)
-
-	require.NoError(t, err)
-	require.NotEmpty(t, response.Text())
-	t.Logf("天气查询响应: %s", response.Text())
-}
-
-func TestWeatherToolDirectCall(t *testing.T) {
-	// 直接测试 weather tool 的功能（不通过模型）
-	ctx := context.Background()
-
-	input := map[string]any{"city": "北京"}
-	resp, err := weatherTool.RunRaw(ctx, input)
-	require.NoError(t, err)
-	t.Logf("直接调用天气: %+v", resp)
 }
