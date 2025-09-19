@@ -12,7 +12,6 @@ import (
 	"github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/compat_oai/openai"
-	openaiGo "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,6 +85,7 @@ func TestAgentBuilder(t *testing.T) {
 	).WithModel("openai/gpt-5-mini").
 		WithTemperature(0.3).
 		WithMaxTokens(500).
+		WithLogging(true).
 		Build()
 
 	// 测试配置
@@ -161,54 +161,89 @@ func TestAgentWithTools(t *testing.T) {
 	assert.Contains(t, result, ".go", "Result should contain file information")
 }
 
-func TestAgentAsToolAdapter(t *testing.T) {
-	// 创建一个 Agent
-	translatorAgent := NewBuilder(
-		g,
-		"translator",
-		"Translates text to specified language",
-		"You are a translator. Translate the provided text to the specified language.",
+func TestSubagentToolCall(t *testing.T) {
+	// 创建独立的 Genkit 实例避免工具注册冲突
+	localG := genkit.Init(
+		context.Background(),
+		genkit.WithPlugins(&openai.OpenAI{
+			APIKey: apiKey,
+			Opts: []option.RequestOption{
+				option.WithBaseURL(baseURL),
+			},
+		}),
+	)
+
+	// 获取工作目录
+	workingDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	// 使用标准方法创建工具，无需担心命名冲突
+	treeTool := tools.NewTreeTool(workingDir)
+	genkitTreeTool := tools.AdaptBaseToolToGenkit(localG, treeTool)
+
+	// 创建下层 Agent（文件浏览器）
+	fileExplorerAgent := NewBuilder(
+		localG,
+		"file_explorer",
+		"Explores file system structure",
+		"You are a file system explorer. Use the tree tool to explore directories and list files.",
 	).WithInputSchema(
 		map[string]any{
-			"text": map[string]any{
+			"request": map[string]any{
 				"type":        "string",
-				"description": "Text to translate",
-			},
-			"target_language": map[string]any{
-				"type":        "string",
-				"description": "Target language",
+				"description": "What to explore in the file system",
 			},
 		},
-		"text", "target_language",
-	).WithModel("openai/gpt-5-mini").
+		"request", // 必需字段
+	).WithTools(genkitTreeTool).
+		WithModel("openai/gpt-5-mini").
+		WithMaxRounds(8).
+		WithLogging(true).
 		Build()
 
-	// 转换为 Tool
-	translatorTool := AsToolAdapter(translatorAgent)
+	// 将下层 Agent 转换为工具
+	// Step 1: Agent -> BaseTool
+	fileExplorerBaseTool := AsToolAdapter(fileExplorerAgent)
 
-	// 测试 Tool 信息
-	info := translatorTool.Info()
-	assert.Equal(t, "translator", info.Name)
-	assert.Equal(t, "Translates text to specified language", info.Description)
-	assert.Contains(t, info.Required, "text")
-	assert.Contains(t, info.Required, "target_language")
+	// Step 2: BaseTool -> Genkit Tool
+	fileExplorerGenkitTool := tools.AdaptBaseToolToGenkit(localG, fileExplorerBaseTool)
 
-	// 测试 Tool 执行
+	// 创建上层 Agent（协调者）- 只有下层 agent 作为工具
+	coordinatorAgent := NewBuilder(
+		localG,
+		"coordinator",
+		"Coordinates file exploration tasks",
+		"You are a coordinator. You MUST use the file_explorer tool to get file system information. Always report the exact output from the tool in your response.",
+	).WithTools(fileExplorerGenkitTool).
+		WithModel("openai/gpt-5-mini").
+		WithMaxRounds(8).
+		WithLogging(true).
+		Build()
+
+	// 测试执行 - 要求列出当前目录的文件
 	ctx := context.Background()
-	toolCall := tools.ToolCall{
-		Name: "translator",
-		Input: `{
-			"text": "Hello, world!",
-			"target_language": "Chinese"
-		}`,
-	}
-
-	response, err := translatorTool.Run(ctx, toolCall)
+	result, err := coordinatorAgent.Run(ctx, "Use the file_explorer tool to list files in the current directory and report what .go files you found")
 	require.NoError(t, err)
-	assert.False(t, response.IsError)
-	assert.NotEmpty(t, response.Content)
+	require.NotEmpty(t, result)
 
-	t.Logf("Translation result: %s", response.Content)
+	t.Logf("Coordinator agent result: %s", result)
+
+	// 验证结果包含实际的文件信息
+	// 由于协调者只能通过 file_explorer 获取信息，
+	// 如果结果包含正确的文件名，说明调用链成功
+	assert.Contains(t, result, ".go", "Result should contain Go file information from the tool")
+
+	// 可选：检查更具体的文件名
+	possibleFiles := []string{"agent_test.go", "agent.go", "builder.go"}
+	foundFile := false
+	for _, file := range possibleFiles {
+		if strings.Contains(result, file) {
+			foundFile = true
+			t.Logf("Found expected file in response: %s", file)
+			break
+		}
+	}
+	assert.True(t, foundFile, "Result should contain at least one actual file name from the directory")
 }
 
 func TestAgentChain(t *testing.T) {
@@ -431,10 +466,4 @@ func TestStatefulVsStatelessToolAdapter(t *testing.T) {
 	resp4, err := statefulTool.Run(ctx, call4)
 	require.NoError(t, err)
 	t.Logf("Stateful call 2: %s", resp4.Content)
-}
-
-func TestToolCallHistoryPreservation(t *testing.T) {
-	// 跳过此测试，因为它与其他测试共享工具注册，会导致冲突
-	// 工具调用历史保留功能已在 TestAgentWithTools 中验证
-	t.Skip("Skipping to avoid tool registration conflict - functionality tested in TestAgentWithTools")
 }
