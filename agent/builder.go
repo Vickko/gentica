@@ -25,7 +25,7 @@ func NewBuilder(
 			Description:  description,
 			SystemPrompt: systemPrompt,
 			// 设置默认值
-			Model:       "openai/gpt-4o-mini",
+			Model:       "openai/gpt-5-mini",
 			Temperature: 0.7,
 			MaxRounds:   5,
 			MaxTokens:   2000,

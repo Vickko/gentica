@@ -40,7 +40,7 @@ func TestGenkitHelloWorld(t *testing.T) {
 
 	// 使用 GPT-4o 发送真实请求
 	response, err := genkit.GenerateText(ctx, g,
-		ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
+		ai.WithModelName("openai/gpt-5-mini"),
 		ai.WithPrompt("请用中文回复：你好，世界！"),
 	)
 
@@ -72,7 +72,7 @@ func TestMultiTurnChatWithSystemPrompt(t *testing.T) {
 
 	// 测试带 system prompt 和多轮对话的情况
 	response, err := genkit.Generate(ctx, g,
-		ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
+		ai.WithModelName("openai/gpt-5-mini"),
 		ai.WithSystem("你是一个专业的Go语言编程助手。请用中文回答问题，并且每次回答要简洁明了。"),
 		ai.WithMessages(chatHistory...),
 		ai.WithPrompt("现在请告诉我Goroutine和Channel如何配合使用？"),

@@ -80,7 +80,7 @@ func ExampleNewBuilder() {
 			},
 		},
 		"text", "target_language", // 必需字段
-	).WithModel("openai/" + string(openaiGo.ChatModelGPT4oMini)).
+	).WithModel("openai/gpt-5-mini").
 		Build()
 
 	// 准备输入

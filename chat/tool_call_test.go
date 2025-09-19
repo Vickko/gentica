@@ -74,7 +74,7 @@ func TestMockWeatherTool(t *testing.T) {
 
 	// 测试使用 weather tool 查询天气
 	response, err := genkit.Generate(ctx, g,
-		ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
+		ai.WithModelName("openai/gpt-5-mini"),
 		ai.WithSystem("你是天气助手，使用getWeather工具查询天气并用中文回复。"),
 		ai.WithTools(weatherTool),
 		ai.WithPrompt("北京今天天气怎么样？"),
@@ -149,7 +149,7 @@ func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	maxRounds := 5
 	for round := 1; round <= maxRounds; round++ {
 		response, err := genkit.Generate(ctx, g,
-			ai.WithModelName("openai/"+string(openaiGo.ChatModelGPT4o)),
+			ai.WithModelName("openai/gpt-5-mini"),
 			ai.WithSystem("你是文件系统助手，请使用tree工具完成任务。"),
 			ai.WithTools(genkitTreeTool),
 			ai.WithMessages(messages...),

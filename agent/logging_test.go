@@ -142,7 +142,7 @@ func TestAgentWithCustomLogger(t *testing.T) {
 
 		// 你可以在直接调用 Generate 时使用中间件
 		_, err = genkit.Generate(ctx, g,
-			ai.WithModelName("openai/gpt-4o-mini"),
+			ai.WithModelName("openai/gpt-5-mini"),
 			ai.WithSystem("你是一个助手"),
 			ai.WithPrompt("你好"),
 			ai.WithMiddleware(loggingMiddleware),
@@ -177,7 +177,7 @@ func TestBuilderChaining(t *testing.T) {
 
 	// 演示完整的链式调用
 	agent := NewBuilder(g, "ChainedAgent", "链式构建的Agent", "系统提示").
-		WithModel("openai/gpt-4o").
+		WithModel("openai/gpt-5-mini").
 		WithTemperature(0.5).
 		WithMaxTokens(1000).
 		WithMaxRounds(3).
@@ -192,7 +192,7 @@ func TestBuilderChaining(t *testing.T) {
 
 	// 验证配置
 	config := agent.GetConfig()
-	require.Equal(t, "openai/gpt-4o", config.Model)
+	require.Equal(t, "openai/gpt-5-mini", config.Model)
 	require.Equal(t, float32(0.5), config.Temperature)
 	require.Equal(t, 1000, config.MaxTokens)
 	require.Equal(t, 3, config.MaxRounds)

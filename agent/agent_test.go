@@ -83,7 +83,7 @@ func TestAgentBuilder(t *testing.T) {
 			},
 		},
 		"code", // 必需字段
-	).WithModel("openai/" + string(openaiGo.ChatModelGPT4oMini)).
+	).WithModel("openai/gpt-5-mini").
 		WithTemperature(0.3).
 		WithMaxTokens(500).
 		Build()
@@ -126,7 +126,7 @@ func TestAgentWithTools(t *testing.T) {
 		"Explores file system structure",
 		"You are a file system explorer. You MUST use the tree tool to explore directories. Never answer file structure questions without using the tree tool first.",
 	).WithTools(genkitTreeTool).
-		WithModel("openai/" + string(openaiGo.ChatModelGPT4oMini)).
+		WithModel("openai/gpt-5-mini").
 		WithMaxRounds(16).
 		WithLogging(true).
 		Build()
@@ -180,7 +180,7 @@ func TestAgentAsToolAdapter(t *testing.T) {
 			},
 		},
 		"text", "target_language",
-	).WithModel("openai/" + string(openaiGo.ChatModelGPT4oMini)).
+	).WithModel("openai/gpt-5-mini").
 		Build()
 
 	// 转换为 Tool
