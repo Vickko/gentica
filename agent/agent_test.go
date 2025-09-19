@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"gentica/tools"
@@ -302,10 +303,12 @@ func TestAgentRouter(t *testing.T) {
 	// 创建路由函数
 	routerFunc := func(ctx context.Context, input string) (string, error) {
 		// 简单的关键词路由
-		if containsAny(input, "math", "calculate", "number", "equation") {
+		if strings.Contains(input, "math") || strings.Contains(input, "calculate") ||
+			strings.Contains(input, "number") || strings.Contains(input, "equation") {
 			return "math", nil
 		}
-		if containsAny(input, "history", "historical", "past", "century") {
+		if strings.Contains(input, "history") || strings.Contains(input, "historical") ||
+			strings.Contains(input, "past") || strings.Contains(input, "century") {
 			return "history", nil
 		}
 		return "math", nil // 默认路由
@@ -342,7 +345,7 @@ func TestAgentPipeline(t *testing.T) {
 			parserAgent,
 			// 只有在验证通过时才执行解析
 			func(ctx context.Context, input string, previousResult string) bool {
-				return containsAny(previousResult, "valid")
+				return strings.Contains(previousResult, "valid")
 			},
 			// 转换函数：将原始输入传递给解析器
 			func(previousResult string) string {
@@ -435,16 +438,3 @@ func TestToolCallHistoryPreservation(t *testing.T) {
 	t.Skip("Skipping to avoid tool registration conflict - functionality tested in TestAgentWithTools")
 }
 
-// 辅助函数：检查字符串是否包含任何关键词
-func containsAny(s string, keywords ...string) bool {
-	for _, keyword := range keywords {
-		if len(keyword) > 0 && len(s) >= len(keyword) {
-			for i := 0; i <= len(s)-len(keyword); i++ {
-				if s[i:i+len(keyword)] == keyword {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
