@@ -5,10 +5,10 @@ import (
 	"os"
 	"testing"
 
+	"gentica/agent"
 	"gentica/tools"
 
 	"github.com/firebase/genkit/go/ai"
-	"github.com/firebase/genkit/go/core"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/compat_oai/openai"
 	openaiGo "github.com/openai/openai-go"
@@ -122,113 +122,6 @@ func TestMockWeatherToolDirectCall(t *testing.T) {
 	t.Logf("直接调用天气: %+v", resp)
 }
 
-// createConversationLogger 创建一个简洁的对话日志中间件
-func createConversationLogger(t *testing.T) func(core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk] {
-	var roundCounter int
-	var lastMessageCount int
-
-	return func(next core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk] {
-		return func(ctx context.Context, req *ai.ModelRequest, cb core.StreamCallback[*ai.ModelResponseChunk]) (*ai.ModelResponse, error) {
-			roundCounter++
-
-			// ========== 请求阶段 ==========
-			t.Logf("\n━━━ Round %d: Request ━━━", roundCounter)
-
-			// 只打印新增的消息（相比上一轮）
-			currentMessageCount := len(req.Messages)
-			newMessages := req.Messages[lastMessageCount:]
-
-			// 首轮打印系统提示
-			if roundCounter == 1 && len(req.Messages) > 0 {
-				for _, msg := range req.Messages {
-					if msg.Role == ai.RoleSystem {
-						t.Logf("📋 System: %s", msg.Text())
-						break
-					}
-				}
-			}
-
-			// 打印新增消息
-			for _, msg := range newMessages {
-				switch msg.Role {
-				case ai.RoleUser:
-					t.Logf("👤 User: %s", msg.Text())
-				case ai.RoleTool:
-					// 工具响应
-					for _, part := range msg.Content {
-						if part.IsToolResponse() {
-							t.Logf("🔧 Tool Response [%s]: %v",
-								part.ToolResponse.Name,
-								part.ToolResponse.Output)
-						}
-					}
-				}
-			}
-
-			// 首轮打印可用工具
-			if roundCounter == 1 && len(req.Tools) > 0 {
-				t.Logf("🛠️  Available Tools:")
-				for _, tool := range req.Tools {
-					t.Logf("   • %s: %s", tool.Name, tool.Description)
-				}
-			}
-
-			// ========== 执行请求 ==========
-			resp, err := next(ctx, req, cb)
-			if err != nil {
-				t.Logf("❌ Error: %v", err)
-				return nil, err
-			}
-
-			// ========== 响应阶段 ==========
-			t.Logf("━━━ Round %d: Response ━━━", roundCounter)
-
-			if resp != nil && resp.Message != nil {
-				// 检查响应内容类型
-				hasToolCall := false
-				hasText := false
-
-				for _, part := range resp.Message.Content {
-					if part.IsToolRequest() {
-						hasToolCall = true
-					}
-					if part.IsText() && part.Text != "" {
-						hasText = true
-					}
-				}
-
-				// 根据内容类型打印
-				if hasToolCall {
-					t.Logf("🔨 Tool Calls:")
-					for _, part := range resp.Message.Content {
-						if part.IsToolRequest() {
-							t.Logf("   → %s(%v)",
-								part.ToolRequest.Name,
-								part.ToolRequest.Input)
-						}
-					}
-				}
-
-				if hasText {
-					t.Logf("🤖 Assistant: %s", resp.Message.Text())
-				}
-
-				// 更新消息计数（包含模型响应）
-				lastMessageCount = currentMessageCount + 1
-			}
-
-			// Token 使用情况
-			if resp != nil && resp.Usage != nil {
-				t.Logf("📊 Tokens: input=%d, output=%d",
-					resp.Usage.InputTokens,
-					resp.Usage.OutputTokens)
-			}
-
-			return resp, nil
-		}
-	}
-}
-
 // TestRealToolWithMiddlewareLogger 展示如何在真实工具场景中复用日志中间件
 func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	ctx := context.Background()
@@ -241,8 +134,8 @@ func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	treeTool := tools.NewTreeTool(workingDir)
 	genkitTreeTool := tools.AdaptBaseToolToGenkit(g, treeTool)
 
-	// 复用日志中间件
-	loggingMiddleware := createConversationLogger(t)
+	// 使用通用的日志中间件
+	loggingMiddleware := agent.CreateConversationLogger(t)
 
 	// 初始消息
 	messages := []*ai.Message{

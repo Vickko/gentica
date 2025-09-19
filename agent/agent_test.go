@@ -127,7 +127,8 @@ func TestAgentWithTools(t *testing.T) {
 		"You are a file system explorer. You MUST use the tree tool to explore directories. Never answer file structure questions without using the tree tool first.",
 	).WithTools(genkitTreeTool).
 		WithModel("openai/" + string(openaiGo.ChatModelGPT4oMini)).
-		WithMaxRounds(3).
+		WithMaxRounds(16).
+		WithLogging(true).
 		Build()
 
 	// 测试执行
@@ -437,4 +438,3 @@ func TestToolCallHistoryPreservation(t *testing.T) {
 	// 工具调用历史保留功能已在 TestAgentWithTools 中验证
 	t.Skip("Skipping to avoid tool registration conflict - functionality tested in TestAgentWithTools")
 }
-

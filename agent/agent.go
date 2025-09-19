@@ -40,4 +40,5 @@ type AgentConfig struct {
 	Temperature  float32          // 温度参数
 	MaxTokens    int              // 最大 token 数
 	MaxRounds    int              // 最大工具调用轮数
+	EnableLogging bool            // 是否启用对话日志
 }

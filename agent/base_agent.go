@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/firebase/genkit/go/ai"
+	"github.com/firebase/genkit/go/core"
 	"github.com/firebase/genkit/go/genkit"
 )
 
@@ -78,6 +79,12 @@ func (a *BaseAgent) executeWithTools(ctx context.Context) (*ai.ModelResponse, er
 		maxRounds = 5
 	}
 
+	// 创建日志中间件（如果启用） - 只创建一次，在所有轮次中复用
+	var loggingMiddleware func(core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]
+	if a.config.EnableLogging {
+		loggingMiddleware = CreateConversationLogger(nil)
+	}
+
 	for round := 0; round < maxRounds; round++ {
 		// 1. 过滤消息以发送给 LLM（移除旧的工具调用）
 		filteredMessages := a.filterMessagesForLLM()
@@ -97,6 +104,11 @@ func (a *BaseAgent) executeWithTools(ctx context.Context) (*ai.ModelResponse, er
 				toolRefs[i] = ai.ToolRef(tool)
 			}
 			opts = append(opts, ai.WithTools(toolRefs...))
+		}
+
+		// 添加日志中间件（如果启用）
+		if loggingMiddleware != nil {
+			opts = append(opts, ai.WithMiddleware(loggingMiddleware))
 		}
 
 		// 3. 调用模型（返回工具请求但不自动执行）

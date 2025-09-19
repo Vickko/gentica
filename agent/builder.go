@@ -70,6 +70,12 @@ func (b *AgentBuilder) WithMaxRounds(rounds int) *AgentBuilder {
 	return b
 }
 
+// WithLogging 启用对话日志
+func (b *AgentBuilder) WithLogging(enable bool) *AgentBuilder {
+	b.config.EnableLogging = enable
+	return b
+}
+
 // Build 构建 Agent
 func (b *AgentBuilder) Build() Agent {
 	return &BaseAgent{
