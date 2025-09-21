@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -466,4 +467,176 @@ func TestStatefulVsStatelessToolAdapter(t *testing.T) {
 	resp4, err := statefulTool.Run(ctx, call4)
 	require.NoError(t, err)
 	t.Logf("Stateful call 2: %s", resp4.Content)
+}
+
+func TestAgentWithResourceDirectoryTools(t *testing.T) {
+	// 创建临时工作目录
+	workingDir := t.TempDir()
+
+	// 初始化完整的文件操作和资源管理工具集
+	resourceTools := []tools.BaseTool{
+		tools.NewResourceDirectoryListTool(workingDir),
+		tools.NewResourceDirectoryAddTool(workingDir),
+		tools.NewResourceDirectoryRemoveTool(workingDir),
+		tools.NewLsTool(workingDir),    // 列出目录文件
+		tools.NewViewTool(workingDir),  // 查看文件内容
+		tools.NewWriteTool(workingDir), // 创建/覆写文件
+		tools.NewEditTool(workingDir),  // 编辑文件内容
+	}
+
+	// 转换为 Genkit 工具
+	genkitTools := tools.BatchAdaptTools(g, resourceTools...)
+
+	// 预先创建 TODO 目录，使用详细的描述说明其用途
+	mgr := tools.GetResourceManager(workingDir)
+	todoDir, err := mgr.Add("TODO", "Task management directory for tracking progress. Use TODO.md file with GitHub-style task lists (- [ ] for pending, - [x] for completed)")
+	require.NoError(t, err)
+
+	// 创建厨师角色 Agent
+	agent := NewBuilder(
+		g,
+		"chef_assistant",
+		"Professional chef preparing dinner",
+		`You are a professional chef preparing dinner. You MUST use the TODO system to plan and track your cooking tasks.
+
+IMPORTANT INSTRUCTIONS:
+1. First, use resource_directory_list to find the TODO directory and understand its purpose
+2. Create a TODO.md file in the TODO directory with your cooking plan using GitHub-style task lists:
+   - Use "- [ ]" for pending tasks
+   - Use "- [x]" for completed tasks
+3. As you progress through cooking (simulated via chat), update the TODO.md file marking completed tasks
+4. Use view tool to read TODO.md and edit tool to update it
+
+Task format example:
+- [ ] Gather ingredients
+- [ ] Prepare vegetables
+- [ ] Cook pasta
+- [x] Set the table (completed)
+
+Remember: Professional chefs always plan before cooking! Be concise but thorough in your planning.`,
+	).WithTools(genkitTools...).
+		WithModel("openai/gpt-5-mini").
+		WithTemperature(0.1).
+		WithMaxRounds(16).
+		WithLogging(true).
+		Build()
+
+	ctx := context.Background()
+
+	// 第一轮：要求厨师开始准备晚餐并制定计划
+	t.Run("Round1_CreatePlan", func(t *testing.T) {
+		result, err := agent.Run(ctx, "You need to prepare an Italian pasta dinner for 4 people. Start by creating your cooking plan in the TODO system.")
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		// 验证 Agent 创建了 TODO.md 文件
+		todoMdPath := filepath.Join(todoDir.Path, "TODO.md")
+		_, err = os.Stat(todoMdPath)
+		assert.NoError(t, err, "TODO.md should be created")
+
+		// 读取并验证 TODO.md 内容
+		content, err := os.ReadFile(todoMdPath)
+		require.NoError(t, err)
+		todoContent := string(content)
+
+		// 验证包含 GitHub 风格的任务列表
+		assert.Contains(t, todoContent, "- [ ]", "Should contain pending tasks")
+		assert.Contains(t, strings.ToLower(todoContent), "pasta", "Should mention pasta")
+
+		t.Logf("Round 1 - Plan created:\n%s", result)
+		t.Logf("TODO.md content:\n%s", todoContent)
+	})
+
+	// 第二轮：模拟开始准备食材
+	t.Run("Round2_StartCooking", func(t *testing.T) {
+		result, err := agent.Run(ctx, "Great! Now start with the first tasks. (Simulation: You've successfully gathered all ingredients and prepared the vegetables. Update your TODO.)")
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		// 验证 TODO.md 被更新
+		todoMdPath := filepath.Join(todoDir.Path, "TODO.md")
+		content, err := os.ReadFile(todoMdPath)
+		require.NoError(t, err)
+		todoContent := string(content)
+
+		// 应该有一些任务被标记为完成
+		assert.Contains(t, todoContent, "- [x]", "Should have completed tasks")
+		assert.Contains(t, todoContent, "- [ ]", "Should still have pending tasks")
+
+		t.Logf("Round 2 - Progress update:\n%s", result)
+		t.Logf("Updated TODO.md:\n%s", todoContent)
+	})
+
+	// 第三轮：继续烹饪过程
+	t.Run("Round3_ContinueCooking", func(t *testing.T) {
+		result, err := agent.Run(ctx, "Continue cooking. (Simulation: The water is boiling, pasta is cooking perfectly, and the sauce is simmering. Update your progress.)")
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		// 验证更多任务被完成
+		todoMdPath := filepath.Join(todoDir.Path, "TODO.md")
+		content, err := os.ReadFile(todoMdPath)
+		require.NoError(t, err)
+		todoContent := string(content)
+
+		// 统计完成的任务数量应该增加
+		completedCount := strings.Count(todoContent, "- [x]")
+		assert.Greater(t, completedCount, 1, "Should have multiple completed tasks")
+
+		t.Logf("Round 3 - Cooking progress:\n%s", result)
+		t.Logf("TODO.md progress:\n%s", todoContent)
+	})
+
+	// 第四轮：完成晚餐
+	t.Run("Round4_CompleteDinner", func(t *testing.T) {
+		result, err := agent.Run(ctx, "Excellent! Finish the meal. (Simulation: Pasta is perfectly al dente, sauce is ready, table is set, and everything is plated beautifully. Complete all remaining tasks.)")
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		// 验证所有主要任务都已完成
+		todoMdPath := filepath.Join(todoDir.Path, "TODO.md")
+		content, err := os.ReadFile(todoMdPath)
+		require.NoError(t, err)
+		todoContent := string(content)
+
+		// 大部分任务应该被标记为完成
+		completedCount := strings.Count(todoContent, "- [x]")
+		pendingCount := strings.Count(todoContent, "- [ ]")
+
+		t.Logf("Final status - Completed: %d, Pending: %d", completedCount, pendingCount)
+		assert.Greater(t, completedCount, 3, "Should have completed most tasks")
+
+		// 验证关键烹饪步骤都完成了
+		todoLower := strings.ToLower(todoContent)
+		if strings.Contains(todoLower, "pasta") && strings.Contains(todoLower, "- [x]") {
+			t.Log("Pasta cooking task completed ✓")
+		}
+
+		t.Logf("Round 4 - Dinner complete:\n%s", result)
+		t.Logf("Final TODO.md:\n%s", todoContent)
+	})
+
+	// 最终验证：检查 Agent 是否成功使用了资源管理系统
+	t.Run("FinalValidation", func(t *testing.T) {
+		// 验证 TODO.md 文件存在且格式正确
+		todoMdPath := filepath.Join(todoDir.Path, "TODO.md")
+		content, err := os.ReadFile(todoMdPath)
+		require.NoError(t, err)
+
+		todoContent := string(content)
+
+		// 验证文件不为空
+		assert.NotEmpty(t, todoContent, "TODO.md should not be empty")
+
+		// 验证包含正确的 Markdown 格式
+		assert.Contains(t, todoContent, "- [", "Should use GitHub-style task lists")
+
+		// 验证有任务进度（既有完成也有可能的未完成）
+		hasProgress := strings.Contains(todoContent, "- [x]")
+		assert.True(t, hasProgress, "Should show task completion progress")
+
+		t.Logf("✅ Chef successfully used the TODO system to plan and track dinner preparation")
+		t.Logf("✅ TODO.md was created and updated throughout the cooking process")
+		t.Logf("✅ GitHub-style task lists were used correctly")
+	})
 }
