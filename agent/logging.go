@@ -117,7 +117,11 @@ func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.Mo
 					}
 				}
 
-				// 根据内容类型打印
+				// 根据内容类型打印（文本优先）
+				if hasText {
+					loggerImpl.Logf("🤖 Assistant: %s", resp.Message.Text())
+				}
+
 				if hasToolCall {
 					loggerImpl.Logf("🔨 Tool Calls:")
 					for _, part := range resp.Message.Content {
@@ -127,10 +131,6 @@ func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.Mo
 								formatToolInput(part.ToolRequest.Input))
 						}
 					}
-				}
-
-				if hasText {
-					loggerImpl.Logf("🤖 Assistant: %s", resp.Message.Text())
 				}
 
 				// 更新消息计数（包含模型响应）

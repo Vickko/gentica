@@ -3,7 +3,7 @@ module gentica
 go 1.25.0
 
 require (
-	github.com/firebase/genkit/go v1.0.2
+	github.com/firebase/genkit/go v1.0.4
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/openai/openai-go v1.12.0
 	github.com/stretchr/testify v1.11.1
