@@ -21,13 +21,13 @@ type ResearchCollectorResult struct {
 // ResearchCollectorDependencies 研究收集器的完整依赖
 type ResearchCollectorDependencies struct {
 	// 工具依赖（已转换为 ai.Tool）
-	ViewTool            ai.Tool
-	WriteTool           ai.Tool
-	LsTool              ai.Tool
-	DirectoryListTool   ai.Tool
-	DirectoryAddTool    ai.Tool
-	DirectoryRemoveTool ai.Tool
-	SearchCrawlerTool   ai.Tool
+	ViewTool          ai.Tool
+	WriteTool         ai.Tool
+	LsTool            ai.Tool
+	BashTool          ai.Tool
+	DirectoryListTool ai.Tool
+	DirectoryAddTool  ai.Tool
+	SearchCrawlerTool ai.Tool
 
 	// Agent 依赖（已转换为 ai.Tool）
 	SearchNeedsAnalyzer ai.Tool
@@ -41,9 +41,9 @@ func NewResearchCollector(g *genkit.Genkit, workingDir string) agent.Agent {
 		ViewTool:            tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
 		WriteTool:           tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(workingDir)),
 		LsTool:              tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
+		BashTool:            tools.AdaptBaseToolToGenkit(g, tools.NewBashTool(workingDir)),
 		DirectoryListTool:   tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(workingDir)),
 		DirectoryAddTool:    tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(workingDir)),
-		DirectoryRemoveTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryRemoveTool(workingDir)),
 		SearchCrawlerTool:   tools.AdaptBaseToolToGenkit(g, tools.NewSearchCrawlerTool(workingDir)),
 		SearchNeedsAnalyzer: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(NewSearchNeedsAnalyzer(g))),
 		ArticleEvaluator:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(NewArticleEvaluator(g, workingDir))),
@@ -97,7 +97,9 @@ func NewResearchCollectorWithDeps(g *genkit.Genkit, deps *ResearchCollectorDepen
    - 保留总分 >= 60 的高质量资料
    - 原则上保留约50%的结果
    - 如果高质量资料过少（少于总数的30%），考虑降低标准到 >= 50
-2. 使用 resourceDirectoryRemove 删除低质量资料
+2. 使用 bash 工具的 rm 命令删除低质量资料文件
+   - 示例：bash {"command": "rm '/path/to/low_score_file.md'"}
+   - 或批量删除：bash {"command": "cd /resource/dir && rm file1.md file2.md file3.md"}
 3. 统计最终保留的资料数量
 
 ### 第七步：质量检查和补充（如需要）
@@ -167,14 +169,14 @@ func NewResearchCollectorWithDeps(g *genkit.Genkit, deps *ResearchCollectorDepen
 		deps.SearchCrawlerTool,
 		deps.DirectoryListTool,
 		deps.DirectoryAddTool,
-		deps.DirectoryRemoveTool,
+		deps.BashTool,
 		deps.ViewTool,
 		deps.WriteTool,
 		deps.LsTool,
 	).WithModel("openai/gpt-5-mini").
 		WithTemperature(0.3). // 低温度以确保稳定和一致的行为
 		WithMaxTokens(4000).
-		WithMaxRounds(10). // 需要多轮工具调用来完成整个流程
+		WithMaxRounds(128). // 需要多轮工具调用来完成整个流程
 		WithLogging(true).
 		Build()
 }

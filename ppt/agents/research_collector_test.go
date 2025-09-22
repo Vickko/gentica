@@ -59,9 +59,9 @@ func TestMain(m *testing.M) {
 		ViewTool:            viewTool, // 复用同一个实例
 		WriteTool:           tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(sharedTempDir)),
 		LsTool:              tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(sharedTempDir)),
+		BashTool:            tools.AdaptBaseToolToGenkit(g, tools.NewBashTool(sharedTempDir)),
 		DirectoryListTool:   tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(sharedTempDir)),
 		DirectoryAddTool:    tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(sharedTempDir)),
-		DirectoryRemoveTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryRemoveTool(sharedTempDir)),
 		SearchCrawlerTool:   tools.AdaptBaseToolToGenkit(g, tools.NewSearchCrawlerTool(sharedTempDir)),
 		SearchNeedsAnalyzer: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(NewSearchNeedsAnalyzer(g))),
 		ArticleEvaluator: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(

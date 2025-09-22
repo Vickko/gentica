@@ -62,7 +62,7 @@ func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.Mo
 			if roundCounter == 1 && len(req.Messages) > 0 {
 				for _, msg := range req.Messages {
 					if msg.Role == ai.RoleSystem {
-						loggerImpl.Logf("📋 System: %s", msg.Text())
+						loggerImpl.Logf("📋 System: %s", truncateMessage(msg.Text(), 200))
 						break
 					}
 				}
@@ -163,4 +163,12 @@ func formatToolOutput(output any) string {
 		return outputStr[:253] + "..."
 	}
 	return outputStr
+}
+
+// truncateMessage 截断消息内容
+func truncateMessage(msg string, maxLength int) string {
+	if len(msg) <= maxLength {
+		return msg
+	}
+	return msg[:maxLength] + "..."
 }
