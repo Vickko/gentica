@@ -141,9 +141,8 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 		filePath = filepath.Join(t.basePath, filePath)
 	}
 
-	// 读取HTML内容
-	htmlContent, err := os.ReadFile(filePath)
-	if err != nil {
+	// 检查文件是否存在
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return HtmlSizeOutput{
 			Valid:   false,
 			Message: fmt.Sprintf("无法读取文件: %v", err),
@@ -151,7 +150,7 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 	}
 
 	// 使用chromedp验证尺寸
-	width, height, err := t.checkSize(string(htmlContent))
+	width, height, err := t.checkSizeFromFile(filePath)
 	if err != nil {
 		return HtmlSizeOutput{
 			Valid:   false,
@@ -177,7 +176,7 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 			output.Suggestion = fmt.Sprintf("尺寸应为1280x720，当前为%dx%d", width, height)
 		} else if !validWidth {
 			output.Suggestion = fmt.Sprintf("宽度应为1280px，当前为%dpx", width)
-		} else if !validHeight {
+		} else {
 			output.Suggestion = fmt.Sprintf("高度应为720px，当前为%dpx", height)
 		}
 	} else {
@@ -188,25 +187,63 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 }
 
 // checkSize 使用chromedp检查HTML尺寸
-func (t *htmlSizeTool) checkSize(htmlContent string) (int, int, error) {
-	ctx, cancel := chromedp.NewContext(context.Background())
+func (t *htmlSizeTool) checkSizeFromFile(filePath string) (int, int, error) {
+	// 配置 Chrome 选项
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.WindowSize(1920, 1080),
+	)
+
+	// 创建 allocator
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+
+	// 创建 chrome 实例
+	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
 	// 设置超时
-	ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	var result []interface{}
-	err := chromedp.Run(ctx,
-		// 导航到空白页面
-		chromedp.Navigate("about:blank"),
-		// 设置页面HTML内容
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			return chromedp.Evaluate(fmt.Sprintf(`document.documentElement.innerHTML = %q`, htmlContent), nil).Do(ctx)
-		}),
-		// 等待slide-container元素出现
-		chromedp.WaitVisible(".slide-container"),
-		// 获取尺寸
+
+	// 获取文件的绝对路径并转换为 file:// URL
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("获取绝对路径失败: %v", err)
+	}
+	fileURL := fmt.Sprintf("file://%s", absPath)
+
+	// 导航到页面
+	err = chromedp.Run(ctx,
+		chromedp.Navigate(fileURL),
+		chromedp.Sleep(1*time.Second), // 等待页面加载
+	)
+
+	if err != nil {
+		return 0, 0, fmt.Errorf("导航失败: %v", err)
+	}
+
+	// 检查元素是否存在
+	var exists bool
+	err = chromedp.Run(ctx,
+		chromedp.Evaluate(`document.querySelector('.slide-container') !== null`, &exists),
+	)
+
+	if err != nil {
+		return 0, 0, fmt.Errorf("检查元素失败: %v", err)
+	}
+
+	if !exists {
+		return 0, 0, fmt.Errorf(".slide-container 元素不存在")
+	}
+
+	// 获取元素尺寸
+	err = chromedp.Run(ctx,
 		chromedp.Evaluate(`
 			const c = document.querySelector('.slide-container');
 			[c.scrollWidth, c.scrollHeight];
