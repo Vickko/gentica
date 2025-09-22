@@ -3,40 +3,12 @@ package agents
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/firebase/genkit/go/genkit"
-	"github.com/firebase/genkit/go/plugins/compat_oai/openai"
-	"github.com/openai/openai-go/option"
 )
 
-var (
-	// 测试配置
-	apiKey  = "sk-6kgtZQDkmZDQMfCo28C360320cEf45FaAf1577Ef08F4032b"
-	baseURL = "https://aihubmix.com/v1"
-)
-
-var g *genkit.Genkit
-
-func TestMain(m *testing.M) {
-	// 初始化 Genkit
-	oai := &openai.OpenAI{
-		APIKey: apiKey,
-		Opts: []option.RequestOption{
-			option.WithBaseURL(baseURL),
-		},
-	}
-
-	g = genkit.Init(
-		context.Background(),
-		genkit.WithPlugins(oai),
-	)
-
-	os.Exit(m.Run())
-}
+// g 变量现在在 research_collector_test.go 中定义和初始化
 
 func TestArticleEvaluator(t *testing.T) {
 
@@ -265,53 +237,3 @@ func TestParseEvaluationResult(t *testing.T) {
 	}
 }
 
-// Example usage
-func ExampleNewArticleEvaluator() {
-	// 初始化 Genkit
-	oai := &openai.OpenAI{
-		APIKey: apiKey,
-		Opts: []option.RequestOption{
-			option.WithBaseURL(baseURL),
-		},
-	}
-
-	exampleGenkit := genkit.Init(
-		context.Background(),
-		genkit.WithPlugins(oai),
-	)
-
-	// 创建评估器
-	evaluator := NewArticleEvaluator(exampleGenkit, "/path/to/working/dir")
-
-	// 准备输入
-	input := map[string]any{
-		"file_path":      "/path/to/article.txt",
-		"research_topic": "人工智能最新进展",
-	}
-
-	inputJSON, _ := json.Marshal(input)
-
-	// 执行评估
-	ctx := context.Background()
-	result, err := evaluator.Run(ctx, string(inputJSON))
-	if err != nil {
-		fmt.Printf("Evaluation failed: %v\n", err)
-		return
-	}
-
-	// 解析结果
-	evaluation, err := ParseEvaluationResult(result)
-	if err != nil {
-		fmt.Printf("Failed to parse result: %v\n", err)
-		return
-	}
-
-	// 使用评估结果
-	fmt.Printf("Research Topic: %s\n", evaluation.Keyword)
-	score := evaluation.Result
-	fmt.Printf("Article: %s (Score: %d)\n", score.Title, score.Score)
-	fmt.Printf("  - Relevance: %d/40\n", score.Relevance)
-	fmt.Printf("  - Quality: %d/30\n", score.Quality)
-	fmt.Printf("  - Timeliness: %d/30\n", score.Timeliness)
-	fmt.Printf("  - Comments: %s\n", score.Comments)
-}

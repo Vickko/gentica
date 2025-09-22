@@ -7,14 +7,15 @@ import (
 	"gentica/agent"
 	"gentica/tools"
 
+	"github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
 )
 
 // ArticleEvaluation 评分结果结构
 type ArticleEvaluation struct {
-	Keyword  string       `json:"keyword"`
-	Result   ArticleScore `json:"result"`
-	Status   string       `json:"status"`
+	Keyword string       `json:"keyword"`
+	Result  ArticleScore `json:"result"`
+	Status  string       `json:"status"`
 }
 
 // ArticleScore 单篇文章的评分
@@ -27,10 +28,27 @@ type ArticleScore struct {
 	Comments   string `json:"comments"`
 }
 
-// NewArticleEvaluator 创建文章评估 Agent
+// ArticleEvaluatorDependencies 文章评估器的依赖
+type ArticleEvaluatorDependencies struct {
+	ViewTool ai.Tool // 文件查看工具
+}
+
+// NewArticleEvaluator 创建文章评估 Agent（使用默认依赖）
 func NewArticleEvaluator(g *genkit.Genkit, workingDir string) agent.Agent {
 	// 准备文件读取工具
 	viewTool := tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir))
+	deps := &ArticleEvaluatorDependencies{
+		ViewTool: viewTool,
+	}
+	return NewArticleEvaluatorWithDeps(g, deps)
+}
+
+// NewArticleEvaluatorWithDeps 创建带依赖注入的文章评估 Agent
+func NewArticleEvaluatorWithDeps(g *genkit.Genkit, deps *ArticleEvaluatorDependencies) agent.Agent {
+	var viewTool ai.Tool
+	if deps != nil && deps.ViewTool != nil {
+		viewTool = deps.ViewTool
+	}
 
 	// 系统提示，包含详细的评分规则
 	systemPrompt := `你是一个专业的文章质量评估专家。你需要根据给定的研究主题，对文章内容进行严格的三维度评分。
