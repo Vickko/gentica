@@ -240,43 +240,10 @@ func NewTemplateDesignAgentWithDeps(g *genkit.Genkit, deps *TemplateDesignAgentD
 4. 可以使用 ls 工具查看目录内容，使用 resourceDirectoryList 查看所有资源目录
 5. 返回包含文件路径和状态的JSON结果
 
-## 输出格式要求
-请生成5段HTML代码，使用以下格式输出：
-
-<html_block id="cover">
-<!DOCTYPE html>
-<html lang="zh-CN">
-...
-</html>
-</html_block>
-
-<html_block id="toc">
-<!DOCTYPE html>
-<html lang="zh-CN">
-...
-</html>
-</html_block>
-
-<html_block id="content">
-<!DOCTYPE html>
-<html lang="zh-CN">
-...
-</html>
-</html_block>
-
-<html_block id="data">
-<!DOCTYPE html>
-<html lang="zh-CN">
-...
-</html>
-</html_block>
-
-<html_block id="ending">
-<!DOCTYPE html>
-<html lang="zh-CN">
-...
-</html>
-</html_block>
+## 重要：输出格式要求
+1. 直接生成5个HTML页面并写入文件，不要在响应中输出HTML内容
+2. 不要使用<html_block>标签或任何形式输出HTML代码
+3. 只需要将HTML保存到文件，然后返回JSON结果
 
 ## 文件保存要求
 1. 创建资源目录，名称格式：ppt_template_[风格关键词]_[timestamp]
@@ -289,7 +256,7 @@ func NewTemplateDesignAgentWithDeps(g *genkit.Genkit, deps *TemplateDesignAgentD
 3. 返回JSON格式的结果，包含文件路径和状态
 
 ## 最终返回格式
-你必须在完成所有工作后，返回以下JSON格式的结果：
+⚠️ 重要：完成所有文件写入后，只返回下面的JSON格式结果，不要输出任何HTML代码或其他内容：
 {
   "status": "success" 或 "failed",
   "directory_name": "资源目录名称",
@@ -301,7 +268,13 @@ func NewTemplateDesignAgentWithDeps(g *genkit.Genkit, deps *TemplateDesignAgentD
     "ending": "结尾页文件路径"
   },
   "summary": "生成的模板设计摘要"
-}`
+}
+
+注意：
+1. 只返回纯JSON，不要包含任何HTML代码
+2. 不要使用<html_block>或其他标签输出HTML
+3. HTML内容只通过write工具保存到文件
+4. 最后的响应必须是可以直接被JSON解析的格式`
 
 	// 准备工具列表
 	toolList := []ai.Tool{}

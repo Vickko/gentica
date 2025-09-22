@@ -49,11 +49,9 @@ type Page struct {
 
 // OutlinePlanResult PPT大纲生成结果
 type OutlinePlanResult struct {
-	Plan          *PPTPlan `json:"plan"`           // 解析后的大纲数据
-	XMLContent    string   `json:"xml_content"`    // 原始 XML 内容
-	FilePath      string   `json:"file_path"`      // 保存的文件路径
-	DirectoryName string   `json:"directory_name"` // 资源目录名称
-	Status        string   `json:"status"`         // 任务状态：success 或 failed
+	FilePath      string `json:"file_path"`      // 保存的文件路径
+	DirectoryName string `json:"directory_name"` // 资源目录名称
+	Status        string `json:"status"`         // 任务状态：success 或 failed
 }
 
 // OutlinePlanAgentDependencies 大纲生成器的依赖
@@ -353,13 +351,6 @@ func ParseOutlineResult(result string) (*OutlinePlanResult, error) {
 		Status:        outlineResult.Status,
 		DirectoryName: outlineResult.DirectoryName,
 		FilePath:      outlineResult.FilePath,
-	}
-
-	// 如果有文件路径，尝试读取并解析XML（这部分可以在实际使用时通过ViewTool实现）
-	if outlineResult.FilePath != "" {
-		// 这里可以通过调用 ViewTool 读取文件内容
-		// 但由于这是在 Agent 外部，通常会在使用时再读取
-		planResult.XMLContent = "" // 实际使用时可以填充
 	}
 
 	return planResult, nil
