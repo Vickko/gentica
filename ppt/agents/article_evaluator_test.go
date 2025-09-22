@@ -11,6 +11,10 @@ import (
 // g 变量现在在 research_collector_test.go 中定义和初始化
 
 func TestArticleEvaluator(t *testing.T) {
+	// 检查 genkit 和共享依赖是否已初始化
+	if g == nil || sharedArticleEvaluator == nil {
+		t.Skip("Skipping test: genkit not initialized or shared dependencies not available")
+	}
 
 	// 创建临时测试文件
 	tempDir := t.TempDir()
@@ -63,8 +67,8 @@ ch := make(chan int, 10)
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// 创建 ArticleEvaluator
-	evaluator := NewArticleEvaluator(g, tempDir)
+	// 使用共享的 ArticleEvaluator
+	evaluator := sharedArticleEvaluator
 
 	// 测试用例
 	testCases := []struct {

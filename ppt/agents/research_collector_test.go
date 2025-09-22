@@ -24,6 +24,13 @@ var (
 	sharedTempDir string
 	g             *genkit.Genkit
 
+	// PPT Top Agent 相关的共享依赖
+	sharedPPTTopDeps    *PPTTopAgentDependencies
+	sharedOutlineAgent  agent.Agent
+	sharedTemplateAgent agent.Agent
+	sharedPageGenAgent  agent.Agent
+	sharedArticleEvaluator agent.Agent
+
 	// 测试配置
 	apiKey  = "sk-6kgtZQDkmZDQMfCo28C360320cEf45FaAf1577Ef08F4032b"
 	baseURL = "https://aihubmix.com/v1"
@@ -54,21 +61,60 @@ func TestMain(m *testing.M) {
 	// 初始化共享依赖（只需要一次）
 	// 使用同一个 ViewTool 避免重复注册
 	viewTool := tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(sharedTempDir))
+	writeTool := tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(sharedTempDir))
+	lsTool := tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(sharedTempDir))
+	bashTool := tools.AdaptBaseToolToGenkit(g, tools.NewBashTool(sharedTempDir))
+	directoryListTool := tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(sharedTempDir))
+	directoryAddTool := tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(sharedTempDir))
+
+	// 创建共享的 ArticleEvaluator
+	sharedArticleEvaluator = NewArticleEvaluatorWithDeps(g, &ArticleEvaluatorDependencies{
+		ViewTool: viewTool, // 复用同一个 ViewTool 实例
+	})
 
 	sharedDeps = &ResearchCollectorDependencies{
 		ViewTool:            viewTool, // 复用同一个实例
-		WriteTool:           tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(sharedTempDir)),
-		LsTool:              tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(sharedTempDir)),
-		BashTool:            tools.AdaptBaseToolToGenkit(g, tools.NewBashTool(sharedTempDir)),
-		DirectoryListTool:   tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(sharedTempDir)),
-		DirectoryAddTool:    tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(sharedTempDir)),
+		WriteTool:           writeTool,
+		LsTool:              lsTool,
+		BashTool:            bashTool,
+		DirectoryListTool:   directoryListTool,
+		DirectoryAddTool:    directoryAddTool,
 		SearchCrawlerTool:   tools.AdaptBaseToolToGenkit(g, tools.NewSearchCrawlerTool(sharedTempDir)),
 		SearchNeedsAnalyzer: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(NewSearchNeedsAnalyzer(g))),
-		ArticleEvaluator: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(
-			NewArticleEvaluatorWithDeps(g, &ArticleEvaluatorDependencies{
-				ViewTool: viewTool, // 复用同一个 ViewTool 实例
-			}),
-		)),
+		ArticleEvaluator:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedArticleEvaluator)),
+	}
+
+	// 初始化 PPT 相关的子 agents（避免重复注册）
+	sharedOutlineAgent = NewOutlinePlanAgentWithDeps(g, &OutlinePlanAgentDependencies{
+		DirectoryAddTool: directoryAddTool,  // 复用
+		WriteTool:        writeTool,         // 复用
+		ViewTool:         viewTool,          // 复用
+	})
+
+	sharedTemplateAgent = NewTemplateDesignAgentWithDeps(g, &TemplateDesignAgentDependencies{
+		DirectoryAddTool:  directoryAddTool,   // 复用
+		DirectoryListTool: directoryListTool,  // 复用
+		WriteTool:         writeTool,          // 复用
+		ViewTool:          viewTool,           // 复用
+		LsTool:            lsTool,             // 复用
+	})
+
+	sharedPageGenAgent = NewPageGenerateAgentWithDeps(g, &PageGenerateAgentDependencies{
+		DirectoryAddTool: directoryAddTool,  // 复用
+		WriteTool:        writeTool,         // 复用
+		ViewTool:         viewTool,          // 复用
+		HtmlSizeTool:     tools.AdaptBaseToolToGenkit(g, tools.NewHtmlSizeTool(sharedTempDir)),
+		LsTool:           lsTool,            // 复用
+	})
+
+	// 创建 PPT Top Agent 的共享依赖 - 将 agents 转换为工具
+	sharedPPTTopDeps = &PPTTopAgentDependencies{
+		OutlinePlanTool:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedOutlineAgent)),
+		TemplateDesignTool: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedTemplateAgent)),
+		PageGenerateTool:   tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedPageGenAgent)),
+		ViewTool:           viewTool,            // 复用
+		LsTool:             lsTool,              // 复用
+		DirectoryListTool:  directoryListTool,   // 复用
 	}
 
 	// 运行测试
