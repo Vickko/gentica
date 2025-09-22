@@ -32,8 +32,9 @@ func (l *TestLogger) Logf(format string, args ...interface{}) {
 }
 
 // CreateConversationLogger 创建一个对话日志中间件
-// 可以传入 nil 使用默认的标准日志器，或传入 *testing.T 使用测试日志器
-func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk] {
+// agentName: Agent 的名称（可选，传空字符串则不显示）
+// logger: 可以传入 nil 使用默认的标准日志器，或传入 *testing.T 使用测试日志器
+func CreateConversationLogger(agentName string, logger interface{}) func(core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk] {
 	var loggerImpl Logger
 	switch v := logger.(type) {
 	case *testing.T:
@@ -51,8 +52,14 @@ func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.Mo
 		return func(ctx context.Context, req *ai.ModelRequest, cb core.StreamCallback[*ai.ModelResponseChunk]) (*ai.ModelResponse, error) {
 			roundCounter++
 
+			// 构建 round 前缀
+			roundPrefix := fmt.Sprintf("Round %d", roundCounter)
+			if agentName != "" {
+				roundPrefix = fmt.Sprintf("[%s] Round %d", agentName, roundCounter)
+			}
+
 			// ========== 请求阶段 ==========
-			loggerImpl.Logf("━━━ Round %d: Request ━━━", roundCounter)
+			loggerImpl.Logf("━━━ %s: Request ━━━", roundPrefix)
 
 			// 只打印新增的消息（相比上一轮）
 			currentMessageCount := len(req.Messages)
@@ -101,7 +108,7 @@ func CreateConversationLogger(logger interface{}) func(core.StreamingFunc[*ai.Mo
 			}
 
 			// ========== 响应阶段 ==========
-			loggerImpl.Logf("━━━ Round %d: Response ━━━", roundCounter)
+			loggerImpl.Logf("━━━ %s: Response ━━━", roundPrefix)
 
 			if resp != nil && resp.Message != nil {
 				// 检查响应内容类型

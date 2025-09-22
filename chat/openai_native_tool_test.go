@@ -347,7 +347,7 @@ func TestGenkitToolWithMessage(t *testing.T) {
 	ctx := context.Background()
 
 	// 导入 agent 包的日志中间件
-	loggingMiddleware := agent.CreateConversationLogger(t)
+	loggingMiddleware := agent.CreateConversationLogger("WeatherAssistant", t)
 
 	// 第一轮对话：调用工具（使用 WithReturnToolRequests 来手动处理工具调用）
 	response, err := genkit.Generate(ctx, gNative,

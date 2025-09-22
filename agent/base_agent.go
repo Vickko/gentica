@@ -82,7 +82,7 @@ func (a *BaseAgent) executeWithTools(ctx context.Context) (*ai.ModelResponse, er
 	// 创建日志中间件（如果启用） - 只创建一次，在所有轮次中复用
 	var loggingMiddleware func(core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]) core.StreamingFunc[*ai.ModelRequest, *ai.ModelResponse, *ai.ModelResponseChunk]
 	if a.config.EnableLogging {
-		loggingMiddleware = CreateConversationLogger(nil)
+		loggingMiddleware = CreateConversationLogger(a.config.Name, nil)
 	}
 
 	for round := 0; round < maxRounds; round++ {

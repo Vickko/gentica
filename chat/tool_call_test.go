@@ -134,7 +134,7 @@ func TestRealToolWithMiddlewareLogger(t *testing.T) {
 	genkitTreeTool := tools.AdaptBaseToolToGenkit(g, treeTool)
 
 	// 使用通用的日志中间件
-	loggingMiddleware := agent.CreateConversationLogger(t)
+	loggingMiddleware := agent.CreateConversationLogger("FileSystemAssistant", t)
 
 	// 初始消息
 	messages := []*ai.Message{

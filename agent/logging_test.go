@@ -138,7 +138,7 @@ func TestAgentWithCustomLogger(t *testing.T) {
 		require.NotEmpty(t, result)
 
 		// 测试直接使用中间件和自定义 logger
-		loggingMiddleware := CreateConversationLogger(testLogger)
+		loggingMiddleware := CreateConversationLogger("TestAgent", testLogger)
 
 		// 你可以在直接调用 Generate 时使用中间件
 		_, err = genkit.Generate(ctx, g,
