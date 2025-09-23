@@ -15,8 +15,8 @@ import (
 
 // PageGenerateInput 页面生成输入
 type PageGenerateInput struct {
-	XMLData   string   `json:"xml_data"`   // PPT单页的XML数据
-	Templates []string `json:"templates"`  // 模板代码列表
+	XMLData   string   `json:"xml_data"`  // PPT单页的XML数据
+	Templates []string `json:"templates"` // 模板代码列表
 }
 
 // PageGenerateResult 页面生成结果
@@ -37,6 +37,7 @@ type PageGenerateAgentDependencies struct {
 	ViewTool          ai.Tool // 文件查看工具
 	HtmlSizeTool      ai.Tool // HTML尺寸验证工具
 	LsTool            ai.Tool // 目录列表工具
+	BashTool          ai.Tool // Bash命令工具
 }
 
 // NewPageGenerateAgent 创建页面生成 Agent（使用默认依赖）
@@ -49,6 +50,7 @@ func NewPageGenerateAgent(g *genkit.Genkit, workingDir string) agent.Agent {
 		ViewTool:          tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
 		HtmlSizeTool:      tools.AdaptBaseToolToGenkit(g, tools.NewHtmlSizeTool(workingDir)),
 		LsTool:            tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
+		BashTool:          tools.AdaptBaseToolToGenkit(g, tools.NewBashTool(workingDir)),
 	}
 	return NewPageGenerateAgentWithDeps(g, deps)
 }
@@ -56,150 +58,58 @@ func NewPageGenerateAgent(g *genkit.Genkit, workingDir string) agent.Agent {
 // NewPageGenerateAgentWithDeps 创建带依赖注入的页面生成 Agent
 func NewPageGenerateAgentWithDeps(g *genkit.Genkit, deps *PageGenerateAgentDependencies) agent.Agent {
 	// 系统提示
-	systemPrompt := `你是一个专业的PPT页面生成专家。请根据大纲和模板，生成符合规范的HTML PPT单页。
+	systemPrompt := `你是专业的PPT页面生成专家。根据大纲和模板生成规范的HTML页面。
 
-## 任务描述
-根据提供的大纲文件路径、模板目录和页码，生成指定的PPT页面HTML。
+## 核心任务
+1. 读取大纲和模板，生成指定页面的HTML
+2. **重要**：如果提供了research_directory，必须充分利用搜索资料，在页面中呈现详实内容
+3. **关键**：必须将最终结果保存为final.html文件
 
-## 生成规则
+## 内容处理
+### 基础内容
+- 从XML提取：page_title、core_content、page_type
 
-### 1. 内容提取与处理
-- 从 XML 中提取：
-  - 主题（page_title）
-  - 副标题/核心内容（core_content）
-  - 类型（page_type）
-  - 图片信息（如有）
-- 如果提供了research_directory：
-  - 使用ls工具列出资料目录中的文件
-  - 根据页面主题查找相关的.md资料文件
-  - 使用view工具读取相关资料，充实页面内容
-  - 在生成的HTML中添加meta标签记录使用的资料：
-    <meta name="research-source" content="使用的资料文件名.md">
+### 搜索资料使用（重点）
+如果有research_directory：
+- 使用ls列出所有资料
+- 使用view详细阅读多个与页面主题高度相关的资料
+- **有意识地将关键数据、事实、统计、案例等高密度内容深度融入页面，提升内容质量**
 
-### 2. 精简与格式优化
-- 删除冗余字词，保留核心观点
-- 对较长内容进行摘要化或分点列表化
-- 限制总字数 ≤ 200 字，总行数 ≤ 6 行，避免溢出
-- 保持模板整体布局、配色和风格不被破坏，仅进行必要的文字与图片替换
+## HTML要求
+- 必须包含.slide-container元素
+- 尺寸1280x720px
+- body设置overflow:hidden
+- 使用px固定尺寸，避免响应式单位
 
-### 3. 图片替换规则
-模板中如果存在 <img> 元素：
-- 保留 <img> 标签及其原有的 class、style、宽高等属性
-- 仅替换其 src 属性为图片关键词和宽高比占位字符串，格式如下：
-  src="__PIC_SRC__{keyword,ratio}"
-
-其中：
-- keyword = 可读英文短语（Title Case，1~6 个英文单词）
-- ratio = 宽高比小数（宽 ÷ 高，保留两位小数，例如 1.78 表示约 16:9）
-- 如果缺少 size 信息，由你根据布局推理
-- alt 属性直接与 keyword 一致
-- 宽度、高度在 HTML 标签中保持（来自原数据或合理推断）
-- 超出图片宽度时，直接截断
-
-图片宽高比生成原则：
-1. 如果 <img> 标签提供了 width 和 height 数值：ratio = width / height
-2. 否则，根据父容器 CSS 尺寸或布局推测
-3. 保留 2 位小数（四舍五入）
-4. 常见比例参考：1.78≈16:9，1.33≈4:3，1.00=1:1
-
-图片关键词生成原则：
-1. 关键词将直接用于 Google Image Search API 搜索
-2. 必须是**准确、易于检索的英文短语**，长度建议 1~6 个英文单词
-3. 需与页面主题、核心内容或图像用途高度相关
-4. 如果原始数据不存在描述，则结合 XML 的 core_content 或场景推断
-5. 避免模糊词（如 thing, object, stuff）和无意义形容词（如 nice, beautiful, amazing）
-6. 如果 <img> 为背景/装饰类，可以用抽象风格短语（如 Blue Gradient Lines、Data Light Effect）
-
-禁止：
-- 在模板中原本没有 <img> 的地方新增图片
-- 删除 <img> 标签或替换为其他标签类型
-
-## 固定基础框架
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>[PPT标题]</title>
-<link href="https://static-cdn-test.camscanner.com/genspark/css/tailwind.min.css" rel="stylesheet"/>
-<link href="https://static-cdn-test.camscanner.com/genspark/css/fontawesome.min.css" rel="stylesheet"/>
-<link href="https://static-cdn-test.camscanner.com/genspark/css/fonts-googleapis.css" rel="stylesheet"/>
-<style>
-body {
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  width: 1280px;
-  height: 720px;
-}
-* { box-sizing: border-box; }
-img {
-  object-fit: cover;
-}
-</style>
-</head>
-<body>
-<!-- 内容在这里 -->
-</body>
-</html>
-
-## 布局安全准则
-✅ 必须：
-- 必须包含 .slide-container 元素
-- .slide-container 尺寸必须严格是 1280x720px
-- 使用 px 固定高度
-- overflow: hidden 防止溢出
-- 统一 box-sizing
-
-❌ 禁止：
-- height: auto 或无高度
-- 不当混用 flex + absolute + float
-- 依赖内容撑开容器高度
-- 使用响应式单位破坏固定布局
-- 缺少 .slide-container 元素
-
-## 生成检查清单
-[ ] 包含 .slide-container 元素
-[ ] 容器严格固定为 1280x720px（不允许偏差）
-[ ] overflow:hidden
-[ ] 所有 <img> 标签保留并已替换 src 为占位符格式
-[ ] 未新增额外图片
-[ ] 内容不溢出
-[ ] 小屏下无水平滚动条
+## 检查清单
+- .slide-container 元素必须存在
+- 容器尺寸1280x720px（允许±10%容错）
+- overflow:hidden 防止溢出
+- **检查是否充分使用搜索资料**
 
 ## 工作流程
 
-1. 读取大纲文件（使用view工具）
-2. 解析XML获取指定页码的页面数据（page_type, page_title, core_content）
-3. 如果提供了research_directory：
-   - 使用ls工具列出资料目录中的文件
-   - 根据页面主题选择相关的资料文件
-   - 使用view工具读取资料内容
-4. 根据页面类型（page_type）读取对应的模板文件：
-   - 封面页 -> cover.html
-   - 目录页 -> toc.html
-   - 内容页 -> content.html
-   - 数据页 -> data.html
-   - 结尾页 -> ending.html
-5. 创建资源目录（格式：page_generate_[timestamp]_p[页码]）
-6. 将页面内容替换到模板中生成HTML
-   - 如果使用了研究资料，添加meta标签记录来源
-7. 保存HTML文件（iterations/attempt_1.html）
-8. 使用html_size工具验证尺寸
-9. 如果尺寸不符合（必须严格是1280x720）：
-   - 调整HTML代码
-   - 保存新版本（iterations/attempt_2.html）
-   - 重新验证
-10. 最多迭代5次
-11. 将最终版本保存为final.html
-12. 返回结果
+1. 读取大纲文件（view工具）并解析指定页码数据
+2. **搜索资料处理**（如果有research_directory）：
+   - ls列出所有资料文件
+   - 查找并读取**多个**相关资料
+   - 提取并整合高价值内容
+3. 读取对应模板（根据page_type）
+4. 创建资源目录：page_generate_[timestamp]_p[页码]
+5. 生成HTML（融入搜索资料内容）
+6. 保存为iterations/attempt_N.html
+7. html_size验证（允许±10%容错）
+8. 如需调整则迭代优化
+9. **必须执行**：使用bash工具复制最终版本为final.html
+   命令：cp iterations/attempt_N.html final.html && pwd
+10. 返回结果（file_path必须是final.html的绝对路径，使用pwd获取）
 
 ## 返回格式
-完成所有工作后，返回以下JSON格式的结果：
+返回JSON：
 {
   "status": "success" 或 "failed",
   "directory_name": "资源目录名称",
-  "file_path": "最终HTML文件路径",
+  "file_path": "必须是final.html的完整路径",
   "iterations": 迭代次数,
   "message": "生成结果说明"
 }`
@@ -224,6 +134,9 @@ img {
 		}
 		if deps.LsTool != nil {
 			toolList = append(toolList, deps.LsTool)
+		}
+		if deps.BashTool != nil {
+			toolList = append(toolList, deps.BashTool)
 		}
 	}
 
@@ -255,9 +168,9 @@ img {
 		"outline_path", "template_dir", "page_number", // 必需字段
 	).WithTools(toolList...).
 		WithModel("openai/gpt-5-mini"). // 使用gpt-5-mini
-		WithTemperature(0.5).            // 代码生成需要更确定性的输出
-		WithMaxTokens(10000).            // 代码生成需要较多token
-		WithMaxRounds(10).               // 支持多轮迭代
+		WithTemperature(0.5). // 代码生成需要更确定性的输出
+		WithMaxTokens(10000). // 代码生成需要较多token
+		WithMaxRounds(16). // 支持多轮迭代
 		WithLogging(true).
 		Build()
 }
@@ -423,4 +336,3 @@ func ValidateGeneratedHTML(htmlContent string) error {
 func GenerateIterationFileName(iteration int) string {
 	return fmt.Sprintf("iterations/attempt_%d.html", iteration)
 }
-

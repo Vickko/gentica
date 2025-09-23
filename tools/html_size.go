@@ -47,12 +47,12 @@ HOW TO USE:
 FEATURES:
 - Uses chromedp to render HTML in a real browser environment
 - Requires .slide-container element to be present
-- Strict validation: must be exactly 1280x720
+- Validation with 10% tolerance: 1280x720 ± 10%
 - Provides adjustment suggestions when dimensions are incorrect
 
 VALIDATION RULES:
-- Width must be exactly 1280px
-- Height must be exactly 720px (no tolerance)
+- Width must be 1280px ± 10% (1152-1408px)
+- Height must be 720px ± 10% (648-792px)
 - Requires .slide-container element
 
 OUTPUT:
@@ -158,9 +158,9 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 		}, nil
 	}
 
-	// 判断是否符合规范（必须严格是1280x720）
-	validWidth := width == 1280
-	validHeight := height == 720
+	// 判断是否符合规范（允许10%的容错，即1152-1408 x 648-792）
+	validWidth := width >= 1152 && width <= 1408   // 1280 ± 10%
+	validHeight := height >= 648 && height <= 792   // 720 ± 10%
 	valid := validWidth && validHeight
 
 	output := HtmlSizeOutput{
@@ -173,14 +173,14 @@ func (t *htmlSizeTool) execute(input HtmlSizeInput) (HtmlSizeOutput, error) {
 	// 添加调整建议
 	if !valid {
 		if !validWidth && !validHeight {
-			output.Suggestion = fmt.Sprintf("尺寸应为1280x720，当前为%dx%d", width, height)
+			output.Suggestion = fmt.Sprintf("尺寸应为1280x720(±10%%)，当前为%dx%d", width, height)
 		} else if !validWidth {
-			output.Suggestion = fmt.Sprintf("宽度应为1280px，当前为%dpx", width)
+			output.Suggestion = fmt.Sprintf("宽度应为1152-1408px，当前为%dpx", width)
 		} else {
-			output.Suggestion = fmt.Sprintf("高度应为720px，当前为%dpx", height)
+			output.Suggestion = fmt.Sprintf("高度应为648-792px，当前为%dpx", height)
 		}
 	} else {
-		output.Message += " - 符合规范"
+		output.Message += " - 符合规范(允许10%容错)"
 	}
 
 	return output, nil
