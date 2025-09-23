@@ -3,7 +3,6 @@ package agents
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +24,10 @@ var (
 	g             *genkit.Genkit
 
 	// PPT Top Agent 相关的共享依赖
-	sharedPPTTopDeps    *PPTTopAgentDependencies
-	sharedOutlineAgent  agent.Agent
-	sharedTemplateAgent agent.Agent
-	sharedPageGenAgent  agent.Agent
+	sharedPPTTopDeps       *PPTTopAgentDependencies
+	sharedOutlineAgent     agent.Agent
+	sharedTemplateAgent    agent.Agent
+	sharedPageGenAgent     agent.Agent
 	sharedArticleEvaluator agent.Agent
 
 	// 测试配置
@@ -86,45 +85,49 @@ func TestMain(m *testing.M) {
 
 	// 初始化 PPT 相关的子 agents（避免重复注册）
 	sharedOutlineAgent = NewOutlinePlanAgentWithDeps(g, &OutlinePlanAgentDependencies{
-		DirectoryAddTool: directoryAddTool,  // 复用
-		WriteTool:        writeTool,         // 复用
-		ViewTool:         viewTool,          // 复用
+		DirectoryAddTool: directoryAddTool, // 复用
+		WriteTool:        writeTool,        // 复用
+		ViewTool:         viewTool,         // 复用
 	})
 
 	sharedTemplateAgent = NewTemplateDesignAgentWithDeps(g, &TemplateDesignAgentDependencies{
-		DirectoryAddTool:  directoryAddTool,   // 复用
-		DirectoryListTool: directoryListTool,  // 复用
-		WriteTool:         writeTool,          // 复用
-		ViewTool:          viewTool,           // 复用
-		LsTool:            lsTool,             // 复用
+		DirectoryAddTool:  directoryAddTool,  // 复用
+		DirectoryListTool: directoryListTool, // 复用
+		WriteTool:         writeTool,         // 复用
+		ViewTool:          viewTool,          // 复用
+		LsTool:            lsTool,            // 复用
 	})
 
 	sharedPageGenAgent = NewPageGenerateAgentWithDeps(g, &PageGenerateAgentDependencies{
-		DirectoryAddTool: directoryAddTool,  // 复用
-		WriteTool:        writeTool,         // 复用
-		ViewTool:         viewTool,          // 复用
+		DirectoryAddTool: directoryAddTool, // 复用
+		WriteTool:        writeTool,        // 复用
+		ViewTool:         viewTool,         // 复用
 		HtmlSizeTool:     tools.AdaptBaseToolToGenkit(g, tools.NewHtmlSizeTool(sharedTempDir)),
-		LsTool:           lsTool,            // 复用
+		LsTool:           lsTool, // 复用
 	})
+
+	// 创建 ResearchCollector
+	researchCollector := NewResearchCollectorWithDeps(g, sharedDeps)
 
 	// 创建 PPT Top Agent 的共享依赖 - 将 agents 转换为工具
 	sharedPPTTopDeps = &PPTTopAgentDependencies{
-		OutlinePlanTool:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedOutlineAgent)),
-		TemplateDesignTool: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedTemplateAgent)),
-		PageGenerateTool:   tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedPageGenAgent)),
-		ViewTool:           viewTool,            // 复用
-		LsTool:             lsTool,              // 复用
-		DirectoryListTool:  directoryListTool,   // 复用
+		ResearchCollectorTool: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(researchCollector)),
+		OutlinePlanTool:       tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedOutlineAgent)),
+		TemplateDesignTool:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedTemplateAgent)),
+		PageGenerateTool:      tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(sharedPageGenAgent)),
+		ViewTool:              viewTool,          // 复用
+		LsTool:                lsTool,            // 复用
+		DirectoryListTool:     directoryListTool, // 复用
 	}
 
 	// 运行测试
 	code := m.Run()
 
-	// 清理共享目录
-	if err := os.RemoveAll(sharedTempDir); err != nil {
-		// 清理失败不应该影响测试结果，只记录错误
-		fmt.Fprintf(os.Stderr, "Failed to cleanup temp dir: %v\n", err)
-	}
+	//// 清理共享目录
+	//if err := os.RemoveAll(sharedTempDir); err != nil {
+	//	// 清理失败不应该影响测试结果，只记录错误
+	//	fmt.Fprintf(os.Stderr, "Failed to cleanup temp dir: %v\n", err)
+	//}
 
 	// 退出
 	os.Exit(code)

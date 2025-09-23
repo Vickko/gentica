@@ -13,6 +13,7 @@ import (
 // PPTTopResult PPT生成最终结果
 type PPTTopResult struct {
 	Status              string            `json:"status"`                // 任务状态：success 或 failed
+	ResearchDirectory   string            `json:"research_directory"`    // 研究资料目录
 	OutlineDirectory    string            `json:"outline_directory"`     // 大纲资源目录
 	OutlineFilePath     string            `json:"outline_file_path"`     // 大纲文件路径
 	TemplateDirectory   string            `json:"template_directory"`    // 模板资源目录
@@ -23,29 +24,32 @@ type PPTTopResult struct {
 
 // PPTTopAgentDependencies PPT顶层协调器的依赖
 type PPTTopAgentDependencies struct {
-	OutlinePlanTool    ai.Tool // 大纲生成工具（已适配的 Agent）
-	TemplateDesignTool ai.Tool // 模板设计工具（已适配的 Agent）
-	PageGenerateTool   ai.Tool // 页面生成工具（已适配的 Agent）
-	ViewTool           ai.Tool // 文件查看工具
-	LsTool             ai.Tool // 目录列表工具
-	DirectoryListTool  ai.Tool // 资源目录列表工具
+	ResearchCollectorTool ai.Tool // 研究资料收集工具（已适配的 Agent）
+	OutlinePlanTool       ai.Tool // 大纲生成工具（已适配的 Agent）
+	TemplateDesignTool    ai.Tool // 模板设计工具（已适配的 Agent）
+	PageGenerateTool      ai.Tool // 页面生成工具（已适配的 Agent）
+	ViewTool              ai.Tool // 文件查看工具
+	LsTool                ai.Tool // 目录列表工具
+	DirectoryListTool     ai.Tool // 资源目录列表工具
 }
 
 // NewPPTTopAgent 创建PPT顶层协调 Agent（使用默认依赖）
 func NewPPTTopAgent(g *genkit.Genkit, workingDir string) agent.Agent {
 	// 创建子 agents
+	researchCollector := NewResearchCollector(g, workingDir)
 	outlineAgent := NewOutlinePlanAgent(g, workingDir)
 	templateAgent := NewTemplateDesignAgent(g, workingDir)
 	pageGenAgent := NewPageGenerateAgent(g, workingDir)
 
 	// 创建依赖 - 将 agents 转换为工具
 	deps := &PPTTopAgentDependencies{
-		OutlinePlanTool:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(outlineAgent)),
-		TemplateDesignTool: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(templateAgent)),
-		PageGenerateTool:   tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(pageGenAgent)),
-		ViewTool:           tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
-		LsTool:             tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
-		DirectoryListTool:  tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(workingDir)),
+		ResearchCollectorTool: tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(researchCollector)),
+		OutlinePlanTool:       tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(outlineAgent)),
+		TemplateDesignTool:    tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(templateAgent)),
+		PageGenerateTool:      tools.AdaptBaseToolToGenkit(g, agent.AsToolAdapter(pageGenAgent)),
+		ViewTool:              tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
+		LsTool:                tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
+		DirectoryListTool:     tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(workingDir)),
 	}
 
 	return NewPPTTopAgentWithDeps(g, deps)
@@ -60,27 +64,39 @@ func NewPPTTopAgentWithDeps(g *genkit.Genkit, deps *PPTTopAgentDependencies) age
 每次回应都必须包含文字内容，不能只调用工具！
 
 ## 工作流程
-### 步骤1：生成PPT大纲
+### 步骤1：收集研究资料
+- 调用 research_collector
+- 输入：{"research_topic": "用户的PPT需求主题"}
+- 获得研究资料目录名称（directory_name）
+- 如果收集失败或不需要资料，跳过并记录原因
+
+### 步骤2：获取研究资料完整路径（如果步骤1成功）
+- 调用 resource_directory_list 获取所有资源目录
+- 从列表中找到名称匹配的目录
+- 获取该目录的完整路径（path字段）
+
+### 步骤3：生成PPT大纲
 - 调用 outline_plan_agent
-- 输入：{"topic": "用户的PPT需求"}
+- 输入：{"topic": "用户的PPT需求", "research_directory": "资料目录完整路径(如有)"}
 - 获得大纲文件路径和目录
 
-### 步骤2：提取风格信息
+### 步骤4：提取风格信息
 - 使用 view 工具读取大纲XML文件
 - 解析 <design_style> 标签内容获取风格描述
 
-### 步骤3：设计PPT模板
+### 步骤5：设计PPT模板
 - 调用 template_design_agent
 - 输入：{"style_description": "从大纲提取的风格描述"}
 - 获得模板文件路径映射
 
-### 步骤4：批量生成页面
+### 步骤6：批量生成页面
 - 读取大纲获取总页数
 - 循环调用 page_generate_agent 生成每一页
 - 输入：{
     "outline_path": "大纲文件路径",
     "template_dir": "模板目录路径",
-    "page_number": N
+    "page_number": N,
+    "research_directory": "资料目录完整路径(如有)"
   }
 - 收集所有生成的页面路径
 
@@ -88,28 +104,36 @@ func NewPPTTopAgentWithDeps(g *genkit.Genkit, deps *PPTTopAgentDependencies) age
 用户："帮我做一个软件测试PPT"
 
 第1轮：
-文字："好的，我来为您制作软件测试PPT。首先生成PPT大纲。"
-工具：[调用 outline_plan_agent，参数: {"topic": "软件测试PPT"}]
+文字："好的，我来为您制作软件测试PPT。首先收集相关研究资料。"
+工具：[调用 research_collector，参数: {"research_topic": "软件测试"}]
 
 第2轮：
-文字："大纲生成完成，保存在 [目录路径]。让我查看大纲内容并提取风格信息。"
-工具：[调用 view，参数: {"file_path": "返回的文件路径"}]
+文字："资料收集完成，保存在目录 [目录名]。让我获取资料的完整路径。"
+工具：[调用 resource_directory_list]
 
 第3轮：
+文字："找到资料目录路径：[完整路径]。现在基于这些资料生成PPT大纲。"
+工具：[调用 outline_plan_agent，参数: {"topic": "软件测试PPT", "research_directory": "完整路径"}]
+
+第4轮：
+文字："大纲生成完成。让我查看大纲内容并提取风格信息。"
+工具：[调用 view，参数: {"file_path": "大纲文件路径"}]
+
+第5轮：
 文字："大纲中设定的风格是[风格描述]。现在基于此风格设计模板。"
 工具：[调用 template_design_agent，参数: {"style_description": "提取的风格"}]
 
-第4轮：
+第6轮：
 文字："模板设计完成。让我查看模板目录结构。"
 工具：[调用 ls，参数: {"path": "模板目录路径"}]
 
-第5轮：
+第7轮：
 文字："模板包含了5个页面类型。大纲共有[N]页，现在开始生成第1页。"
-工具：[调用 page_generate_agent，参数: {"outline_path": "大纲路径", "template_dir": "模板目录", "page_number": 1}]
+工具：[调用 page_generate_agent，参数: {"outline_path": "大纲路径", "template_dir": "模板目录", "page_number": 1, "research_directory": "完整路径"}]
 
-第6轮：
+第8轮：
 文字："第1页生成完成。继续生成第2页。"
-工具：[调用 page_generate_agent，参数: {"outline_path": "大纲路径", "template_dir": "模板目录", "page_number": 2}]
+工具：[调用 page_generate_agent，参数: {"outline_path": "大纲路径", "template_dir": "模板目录", "page_number": 2, "research_directory": "完整路径"}]
 
 [继续生成剩余页面...]
 
@@ -118,7 +142,7 @@ func NewPPTTopAgentWithDeps(g *genkit.Genkit, deps *PPTTopAgentDependencies) age
 
 ## 重要提示
 - 每个阶段都要用文字说明当前进度和下一步计划
-- 根据需要使用文件系统工具查看中间结果
+- 研究资料收集后，必须获取完整路径才能传递给后续agents
 - 确保数据在各个agent间正确传递
 - 最后汇总所有生成的资源位置
 
@@ -126,6 +150,7 @@ func NewPPTTopAgentWithDeps(g *genkit.Genkit, deps *PPTTopAgentDependencies) age
 完成所有工作后，返回JSON格式的汇总结果：
 {
   "status": "success",
+  "research_directory": "研究资料目录完整路径",
   "outline_directory": "大纲资源目录",
   "outline_file_path": "大纲文件路径",
   "template_directory": "模板资源目录",
@@ -138,6 +163,9 @@ func NewPPTTopAgentWithDeps(g *genkit.Genkit, deps *PPTTopAgentDependencies) age
 	toolList := []ai.Tool{}
 
 	// 添加子 agents 作为工具（已经是 ai.Tool 类型）
+	if deps.ResearchCollectorTool != nil {
+		toolList = append(toolList, deps.ResearchCollectorTool)
+	}
 	if deps.OutlinePlanTool != nil {
 		toolList = append(toolList, deps.OutlinePlanTool)
 	}

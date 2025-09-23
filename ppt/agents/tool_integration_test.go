@@ -113,4 +113,37 @@ func TestBothAgentsHaveLsAndDirectoryList(t *testing.T) {
 			assert.True(t, hasDirectoryListTool, "ResearchCollector should have resource_directory_list tool")
 		}
 	})
+
+	// 测试 OutlinePlanAgent 结构
+	t.Run("OutlinePlanAgent_Structure", func(t *testing.T) {
+		// 创建一个模拟的依赖结构来验证字段存在
+		outlineDeps := &OutlinePlanAgentDependencies{}
+
+		// 验证结构体有所有必要的字段（通过类型检查）
+		var _ = outlineDeps.DirectoryAddTool
+		var _ = outlineDeps.DirectoryListTool
+		var _ = outlineDeps.WriteTool
+		var _ = outlineDeps.ViewTool
+		var _ = outlineDeps.LsTool
+
+		// 如果能编译通过，说明所有字段都存在
+		assert.True(t, true, "OutlinePlanAgent has all required tool fields including LsTool and DirectoryListTool")
+	})
+
+	// 测试 PageGenerateAgent 结构
+	t.Run("PageGenerateAgent_Structure", func(t *testing.T) {
+		// 创建一个模拟的依赖结构来验证字段存在
+		pageDeps := &PageGenerateAgentDependencies{}
+
+		// 验证结构体有所有必要的字段（通过类型检查）
+		var _ = pageDeps.DirectoryAddTool
+		var _ = pageDeps.DirectoryListTool
+		var _ = pageDeps.WriteTool
+		var _ = pageDeps.ViewTool
+		var _ = pageDeps.HtmlSizeTool
+		var _ = pageDeps.LsTool
+
+		// 如果能编译通过，说明所有字段都存在
+		assert.True(t, true, "PageGenerateAgent has all required tool fields including LsTool and DirectoryListTool")
+	})
 }

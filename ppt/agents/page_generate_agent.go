@@ -31,22 +31,24 @@ type PageGenerateResult struct {
 
 // PageGenerateAgentDependencies 页面生成器的依赖
 type PageGenerateAgentDependencies struct {
-	DirectoryAddTool ai.Tool // 资源目录创建工具
-	WriteTool        ai.Tool // 文件写入工具
-	ViewTool         ai.Tool // 文件查看工具
-	HtmlSizeTool     ai.Tool // HTML尺寸验证工具
-	LsTool           ai.Tool // 目录列表工具
+	DirectoryAddTool  ai.Tool // 资源目录创建工具
+	DirectoryListTool ai.Tool // 资源目录列表工具
+	WriteTool         ai.Tool // 文件写入工具
+	ViewTool          ai.Tool // 文件查看工具
+	HtmlSizeTool      ai.Tool // HTML尺寸验证工具
+	LsTool            ai.Tool // 目录列表工具
 }
 
 // NewPageGenerateAgent 创建页面生成 Agent（使用默认依赖）
 func NewPageGenerateAgent(g *genkit.Genkit, workingDir string) agent.Agent {
 	// 创建默认工具
 	deps := &PageGenerateAgentDependencies{
-		DirectoryAddTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(workingDir)),
-		WriteTool:        tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(workingDir)),
-		ViewTool:         tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
-		HtmlSizeTool:     tools.AdaptBaseToolToGenkit(g, tools.NewHtmlSizeTool(workingDir)),
-		LsTool:           tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
+		DirectoryAddTool:  tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(workingDir)),
+		DirectoryListTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(workingDir)),
+		WriteTool:         tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(workingDir)),
+		ViewTool:          tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
+		HtmlSizeTool:      tools.AdaptBaseToolToGenkit(g, tools.NewHtmlSizeTool(workingDir)),
+		LsTool:            tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
 	}
 	return NewPageGenerateAgentWithDeps(g, deps)
 }
@@ -67,6 +69,12 @@ func NewPageGenerateAgentWithDeps(g *genkit.Genkit, deps *PageGenerateAgentDepen
   - 副标题/核心内容（core_content）
   - 类型（page_type）
   - 图片信息（如有）
+- 如果提供了research_directory：
+  - 使用ls工具列出资料目录中的文件
+  - 根据页面主题查找相关的.md资料文件
+  - 使用view工具读取相关资料，充实页面内容
+  - 在生成的HTML中添加meta标签记录使用的资料：
+    <meta name="research-source" content="使用的资料文件名.md">
 
 ### 2. 精简与格式优化
 - 删除冗余字词，保留核心观点
@@ -163,23 +171,28 @@ img {
 
 1. 读取大纲文件（使用view工具）
 2. 解析XML获取指定页码的页面数据（page_type, page_title, core_content）
-3. 根据页面类型（page_type）读取对应的模板文件：
+3. 如果提供了research_directory：
+   - 使用ls工具列出资料目录中的文件
+   - 根据页面主题选择相关的资料文件
+   - 使用view工具读取资料内容
+4. 根据页面类型（page_type）读取对应的模板文件：
    - 封面页 -> cover.html
    - 目录页 -> toc.html
    - 内容页 -> content.html
    - 数据页 -> data.html
    - 结尾页 -> ending.html
-4. 创建资源目录（格式：page_generate_[timestamp]_p[页码]）
-5. 将页面内容替换到模板中生成HTML
-6. 保存HTML文件（iterations/attempt_1.html）
-7. 使用html_size工具验证尺寸
-8. 如果尺寸不符合（必须严格是1280x720）：
+5. 创建资源目录（格式：page_generate_[timestamp]_p[页码]）
+6. 将页面内容替换到模板中生成HTML
+   - 如果使用了研究资料，添加meta标签记录来源
+7. 保存HTML文件（iterations/attempt_1.html）
+8. 使用html_size工具验证尺寸
+9. 如果尺寸不符合（必须严格是1280x720）：
    - 调整HTML代码
    - 保存新版本（iterations/attempt_2.html）
    - 重新验证
-9. 最多迭代5次
-10. 将最终版本保存为final.html
-11. 返回结果
+10. 最多迭代5次
+11. 将最终版本保存为final.html
+12. 返回结果
 
 ## 返回格式
 完成所有工作后，返回以下JSON格式的结果：
@@ -196,6 +209,9 @@ img {
 	if deps != nil {
 		if deps.DirectoryAddTool != nil {
 			toolList = append(toolList, deps.DirectoryAddTool)
+		}
+		if deps.DirectoryListTool != nil {
+			toolList = append(toolList, deps.DirectoryListTool)
 		}
 		if deps.WriteTool != nil {
 			toolList = append(toolList, deps.WriteTool)
@@ -230,6 +246,10 @@ img {
 			"page_number": map[string]any{
 				"type":        "integer",
 				"description": "要生成的页码（从1开始）",
+			},
+			"research_directory": map[string]any{
+				"type":        "string",
+				"description": "研究资料目录路径（可选）",
 			},
 		},
 		"outline_path", "template_dir", "page_number", // 必需字段

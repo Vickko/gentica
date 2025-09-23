@@ -56,18 +56,22 @@ type OutlinePlanResult struct {
 
 // OutlinePlanAgentDependencies 大纲生成器的依赖
 type OutlinePlanAgentDependencies struct {
-	DirectoryAddTool ai.Tool // 资源目录创建工具
-	WriteTool        ai.Tool // 文件写入工具
-	ViewTool         ai.Tool // 文件查看工具（可选，用于验证）
+	DirectoryAddTool  ai.Tool // 资源目录创建工具
+	DirectoryListTool ai.Tool // 资源目录列表工具
+	WriteTool         ai.Tool // 文件写入工具
+	ViewTool          ai.Tool // 文件查看工具（可选，用于验证）
+	LsTool            ai.Tool // 目录列表工具
 }
 
 // NewOutlinePlanAgent 创建大纲生成 Agent（使用默认依赖）
 func NewOutlinePlanAgent(g *genkit.Genkit, workingDir string) agent.Agent {
 	// 创建默认工具
 	deps := &OutlinePlanAgentDependencies{
-		DirectoryAddTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(workingDir)),
-		WriteTool:        tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(workingDir)),
-		ViewTool:         tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
+		DirectoryAddTool:  tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryAddTool(workingDir)),
+		DirectoryListTool: tools.AdaptBaseToolToGenkit(g, tools.NewResourceDirectoryListTool(workingDir)),
+		WriteTool:         tools.AdaptBaseToolToGenkit(g, tools.NewWriteTool(workingDir)),
+		ViewTool:          tools.AdaptBaseToolToGenkit(g, tools.NewViewTool(workingDir)),
+		LsTool:            tools.AdaptBaseToolToGenkit(g, tools.NewLsTool(workingDir)),
 	}
 	return NewOutlinePlanAgentWithDeps(g, deps)
 }
@@ -79,7 +83,12 @@ func NewOutlinePlanAgentWithDeps(g *genkit.Genkit, deps *OutlinePlanAgentDepende
 
 ## 分析与思考流程
 1. **内容解析**：明确主题、核心信息点、风格、受众、演示场景和目的，并识别行业专业程度及潜台词。
+   - 如果提供了research_directory，使用ls工具列出资料目录中的文件
+   - 使用view工具阅读相关的研究资料文件（.md格式）
+   - 从资料中提取关键信息和观点，作为大纲内容的基础
 2. **信息补充**：当数据不足以支撑完整大纲时，基于常识和合理推断补充信息，但需确保逻辑自洽。
+   - 优先使用研究资料中的内容
+   - 资料不足时再进行合理推断
 3. **内容澄清**：若出现多义/模糊概念，可利用信息推断或网络常识进行消歧。
 4. **主题策略**：优化演示主题，制定分章节的演示逻辑，提炼核心信息。
 5. **结构规划与分页策略**：
@@ -214,11 +223,17 @@ func NewOutlinePlanAgentWithDeps(g *genkit.Genkit, deps *OutlinePlanAgentDepende
 		if deps.DirectoryAddTool != nil {
 			toolList = append(toolList, deps.DirectoryAddTool)
 		}
+		if deps.DirectoryListTool != nil {
+			toolList = append(toolList, deps.DirectoryListTool)
+		}
 		if deps.WriteTool != nil {
 			toolList = append(toolList, deps.WriteTool)
 		}
 		if deps.ViewTool != nil {
 			toolList = append(toolList, deps.ViewTool)
+		}
+		if deps.LsTool != nil {
+			toolList = append(toolList, deps.LsTool)
 		}
 	}
 
@@ -233,6 +248,10 @@ func NewOutlinePlanAgentWithDeps(g *genkit.Genkit, deps *OutlinePlanAgentDepende
 			"topic": map[string]any{
 				"type":        "string",
 				"description": "PPT主题或详细资料",
+			},
+			"research_directory": map[string]any{
+				"type":        "string",
+				"description": "研究资料目录路径（可选）",
 			},
 		},
 		"topic", // 必需字段
