@@ -8,6 +8,7 @@
 
 - [概述](#概述)
 - [一、核心架构实体](#一核心架构实体)
+  - [0. Genkit Instance (Genkit 实例)](#0-genkit-instance-genkit-实例)
   - [1. ActionDef (Action Definition)](#1-actiondef-action-definition)
   - [2. Flow (流程)](#2-flow-流程)
   - [3. Registry (注册表)](#3-registry-注册表)
@@ -39,6 +40,252 @@ Genkit Go 是 Google 开发的开源 AI 应用开发框架，专为 Go 生态设
 ---
 
 ## 一、核心架构实体
+
+### 0. Genkit Instance (Genkit 实例)
+
+**源码位置**: `go/genkit/genkit.go:36-43`
+
+Genkit 实例是整个框架的入口点和中心枢纽，封装了 Registry 并提供友好的 API。
+
+#### 核心结构
+
+```go
+// Genkit 封装了一个 Genkit 实例，提供对其注册表、配置和核心功能的访问。
+// 它作为定义和管理 Genkit 资源（如 flows、models、tools 和 prompts）的中心枢纽。
+type Genkit struct {
+    reg *registry.Registry  // 用于 actions、values 和其他资源的注册表
+}
+```
+
+#### 核心特性
+
+- **Registry 封装**：Genkit 实例本质上是对 `Registry` 的封装，提供更友好的 API
+- **门面模式**：隐藏了底层 Registry 的复杂性，提供简洁的接口
+- **统一入口**：所有 Genkit 操作的中心访问点
+- **生命周期管理**：管理插件初始化、开发服务器等
+
+#### 创建 Genkit 实例
+
+```go
+// Init 创建并初始化一个新的 Genkit 实例
+g := genkit.Init(ctx,
+    genkit.WithPlugins(
+        googlegenai.NewPlugin(),  // 初始化插件
+        pinecone.NewPlugin(),
+    ),
+    genkit.WithDefaultModel("googleai/gemini-1.5-flash"),  // 设置默认模型
+    genkit.WithPromptDir("./prompts"),  // 加载提示词目录
+)
+```
+
+#### Init 过程详解
+
+```go
+func Init(ctx context.Context, opts ...GenkitOption) *Genkit
+```
+
+`Init` 函数执行以下步骤：
+
+1. **创建 Registry**
+   ```go
+   r := registry.New()
+   g := &Genkit{reg: r}
+   ```
+
+2. **初始化插件**
+   ```go
+   for _, plugin := range gOpts.Plugins {
+       actions := plugin.Init(ctx)  // 调用插件的 Init 方法
+       for _, action := range actions {
+           action.Register(r)       // 注册插件提供的 actions
+       }
+       r.RegisterPlugin(plugin.Name(), plugin)
+   }
+   ```
+
+3. **配置 AI 组件**
+   ```go
+   ai.ConfigureFormats(r)        // 配置输出格式（json, text 等）
+   ai.DefineGenerateAction(ctx, r)  // 定义 generate action
+   ```
+
+4. **加载提示词**
+   ```go
+   ai.LoadPromptDir(r, gOpts.PromptDir, "")  // 从目录加载 .prompt 文件
+   ```
+
+5. **注册配置值**
+   ```go
+   r.RegisterValue(api.DefaultModelKey, gOpts.DefaultModel)
+   r.RegisterValue(api.PromptDirKey, gOpts.PromptDir)
+   ```
+
+6. **启动开发服务器**（仅在 dev 环境）
+   ```go
+   if api.CurrentEnvironment() == api.EnvironmentDev {
+       go startReflectionServer(ctx, g, ...)  // 启动 Reflection API (端口 3100)
+   }
+   ```
+
+#### Genkit 实例提供的 API
+
+Genkit 实例封装 Registry，提供以下便捷方法：
+
+**定义组件**：
+```go
+// Flows
+flow := genkit.DefineFlow(g, name, fn)
+streamFlow := genkit.DefineStreamingFlow(g, name, fn)
+
+// Models
+model := genkit.DefineModel(g, name, opts, fn)
+
+// Tools
+tool := genkit.DefineTool(g, name, desc, fn)
+
+// Prompts
+prompt := genkit.DefinePrompt(g, name, opts...)
+
+// Retrievers, Embedders, Evaluators 等
+retriever := genkit.DefineRetriever(g, name, opts, fn)
+embedder := genkit.DefineEmbedder(g, name, opts, fn)
+evaluator := genkit.DefineEvaluator(g, name, opts, fn)
+```
+
+**查找组件**：
+```go
+model := genkit.LookupModel(g, "gemini-1.5-flash")
+tool := genkit.LookupTool(g, "search")
+prompt := genkit.LookupPrompt(g, "summarize")
+plugin := genkit.LookupPlugin(g, "googleai")
+```
+
+**执行操作**：
+```go
+// 生成
+resp, _ := genkit.Generate(ctx, g, ai.WithPrompt("Hello"))
+text, _ := genkit.GenerateText(ctx, g, ai.WithPrompt("Hello"))
+data, _, _ := genkit.GenerateData[MyType](ctx, g, opts...)
+
+// 检索和嵌入
+docs, _ := genkit.Retrieve(ctx, g, ai.WithRetriever("myDB"), ...)
+embeddings, _ := genkit.Embed(ctx, g, ai.WithEmbedder("text-embedding"), ...)
+
+// 评估
+results, _ := genkit.Evaluate(ctx, g, ai.WithEvaluator("faithfulness"), ...)
+```
+
+**列出组件**：
+```go
+flows := genkit.ListFlows(g)      // 所有 flows
+tools := genkit.ListTools(g)      // 所有 tools
+resources := genkit.ListResources(g)  // 所有 resources
+```
+
+#### Genkit 实例 vs Registry
+
+```
+┌─────────────────────────────────────────────────────────┐
+│               Genkit Instance (门面层)                   │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  高级 API:                                        │  │
+│  │  - DefineFlow(g, ...)                            │  │
+│  │  - Generate(ctx, g, ...)                         │  │
+│  │  - LookupModel(g, ...)                           │  │
+│  └─────────────────┬───────────────────────────────┘  │
+│                    │ 委托调用                           │
+│  ┌─────────────────▼───────────────────────────────┐  │
+│  │          Registry (核心层)                       │  │
+│  │  ┌────────────────────────────────────────────┐ │  │
+│  │  │ 底层操作:                                  │ │  │
+│  │  │ - RegisterAction(key, action)             │ │  │
+│  │  │ - LookupAction(key)                       │ │  │
+│  │  │ - ResolveAction(key)                      │ │  │
+│  │  └────────────────────────────────────────────┘ │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**为什么需要 Genkit 实例？**
+
+1. **简化 API**：
+   ```go
+   // 使用 Genkit 实例（简洁）
+   genkit.DefineFlow(g, "myFlow", fn)
+
+   // 直接使用 Registry（繁琐）
+   core.DefineFlow(g.reg, "myFlow", fn)
+   ```
+
+2. **统一管理**：
+   - 一个应用通常只有一个 Genkit 实例
+   - 集中管理所有 AI 组件
+   - 便于依赖注入和测试
+
+3. **生命周期控制**：
+   - 插件初始化
+   - 开发服务器启动/关闭
+   - 资源清理
+
+4. **环境感知**：
+   - 开发环境：启动 Reflection API 服务器
+   - 生产环境：仅核心功能
+
+#### 完整使用示例
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/firebase/genkit/go/ai"
+    "github.com/firebase/genkit/go/genkit"
+    "github.com/firebase/genkit/go/plugins/googlegenai"
+)
+
+func main() {
+    ctx := context.Background()
+
+    // 1. 初始化 Genkit 实例
+    g := genkit.Init(ctx,
+        genkit.WithPlugins(googlegenai.NewPlugin()),
+        genkit.WithDefaultModel("googleai/gemini-1.5-flash"),
+    )
+
+    // 2. 定义组件（使用 Genkit 实例）
+    myFlow := genkit.DefineFlow(g, "greetingFlow",
+        func(ctx context.Context, name string) (string, error) {
+            // 3. 在 flow 中使用 Genkit 实例的方法
+            resp, err := genkit.Generate(ctx, g,
+                ai.WithPrompt(fmt.Sprintf("问候 %s", name)),
+            )
+            if err != nil {
+                return "", err
+            }
+            return resp.Text(), nil
+        },
+    )
+
+    // 4. 运行 flow
+    result, err := myFlow.Run(ctx, "世界")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println(result)  // 输出问候语
+}
+```
+
+#### 关键设计理念
+
+1. **单一实例模式**：通常一个应用只创建一个 Genkit 实例
+2. **依赖注入**：将 `*Genkit` 传递给需要它的函数
+3. **声明式配置**：通过 `GenkitOption` 配置实例
+4. **延迟初始化**：某些组件（如动态插件）按需解析
+
+---
 
 ### 1. ActionDef (Action Definition)
 
@@ -1178,25 +1425,29 @@ for i, result := range response {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         Registry                             │
-│              (中央注册表 - 管理所有组件)                       │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ 注册/查找
-          ┌───────────────┼───────────────┐
-          │               │               │
-       Plugin         ActionDef          Flow
-       (插件)        (基础抽象)        (工作流)
-          │               │               │
-          │               └───────┬───────┘
-          │                       │ 继承/包装
-          ├───────────────────────┼───────────────────────┐
-          │                       │                       │
-       Model                   Tool                  Embedder
-       (模型)                  (工具)                (嵌入器)
-          │                       │                       │
-          │                       │                       │
-       Retriever              Prompt              Evaluator
-       (检索器)              (提示词)              (评估器)
+│                    Genkit Instance                           │
+│                 (应用入口 - 门面层)                           │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                     Registry                          │  │
+│  │              (中央注册表 - 管理所有组件)                │  │
+│  └─────────────────────────┬─────────────────────────────┘  │
+└────────────────────────────┼────────────────────────────────┘
+                             │ 注册/查找
+             ┌───────────────┼───────────────┐
+             │               │               │
+          Plugin         ActionDef          Flow
+          (插件)        (基础抽象)        (工作流)
+             │               │               │
+             │               └───────┬───────┘
+             │                       │ 继承/包装
+             ├───────────────────────┼───────────────────────┐
+             │                       │                       │
+          Model                   Tool                  Embedder
+          (模型)                  (工具)                (嵌入器)
+             │                       │                       │
+             │                       │                       │
+          Retriever              Prompt              Evaluator
+          (检索器)              (提示词)              (评估器)
 ```
 
 ### 1. Action-Based 统一抽象
