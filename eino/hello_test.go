@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -510,7 +511,135 @@ func (t *ThrowDiceTool) InvokableRun(ctx context.Context, argumentsInJSON string
 	return resultStr, nil
 }
 
-// TestThrowDiceWithTool 测试使用掷骰子工具
+// TestThrowDiceWithAgent 测试使用 Agent 方式的掷骰子工具（展示 Agent 如何压缩 Graph）
+func TestThrowDiceWithAgent(t *testing.T) {
+	ctx := context.Background()
+
+	// 配置 OpenAI 客户端
+	config := &openai.ChatModelConfig{
+		BaseURL: "https://aihubmix.com/v1",
+		APIKey:  "sk-6kgtZQDkmZDQMfCo28C360320cEf45FaAf1577Ef08F4032b",
+		Model:   "gpt-4o-mini",
+	}
+
+	// 创建支持工具调用的 ChatModel
+	chatModel, err := openai.NewChatModel(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to create chat model: %v", err)
+	}
+
+	// 创建掷骰子工具
+	diceTool := NewThrowDiceTool()
+
+	// ✨ 使用 Agent 方式：一行代码替代 100+ 行的 Graph 编排
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:        "dice_agent",
+		Description: "An agent that can throw dice for you",
+		Instruction: "You are a helpful assistant that can throw dice for users.",
+		Model:       chatModel,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: []tool.BaseTool{diceTool},
+			},
+		},
+		MaxIterations: 10,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create agent: %v", err)
+	}
+
+	// ===== 测试1：要求掷骰子 =====
+	t.Log("\n===== Test 1: Ask to throw a dice (using Agent) =====")
+
+	input1 := &adk.AgentInput{
+		Messages: []adk.Message{
+			schema.UserMessage("Please throw a dice for me and tell me the result!"),
+		},
+	}
+
+	iter1 := agent.Run(ctx, input1)
+	result1 := getAgentFinalResult(t, iter1)
+
+	t.Logf("User: %s", input1.Messages[0].Content)
+	t.Logf("Agent result: %s", result1)
+
+	// ===== 测试2：掷多个骰子 =====
+	t.Log("\n===== Test 2: Throw multiple dice (using Agent) =====")
+
+	input2 := &adk.AgentInput{
+		Messages: []adk.Message{
+			schema.UserMessage("Throw 3 dice with 20 sides each (like D&D dice) and tell me the total!"),
+		},
+	}
+
+	iter2 := agent.Run(ctx, input2)
+	result2 := getAgentFinalResult(t, iter2)
+
+	t.Logf("User: %s", input2.Messages[0].Content)
+	t.Logf("Agent result: %s", result2)
+
+	// ===== 测试3：普通对话（不使用工具） =====
+	t.Log("\n===== Test 3: Normal conversation without tool (using Agent) =====")
+
+	input3 := &adk.AgentInput{
+		Messages: []adk.Message{
+			schema.UserMessage("What is the capital of France?"),
+		},
+	}
+
+	iter3 := agent.Run(ctx, input3)
+	result3 := getAgentFinalResult(t, iter3)
+
+	t.Logf("User: %s", input3.Messages[0].Content)
+	t.Logf("Assistant: %s", result3)
+
+	t.Log("\n===== 代码对比总结 =====")
+	t.Log("Graph 方式: ~150 行代码 (定义节点、边、状态处理器、分支)")
+	t.Log("Agent 方式: ~10 行核心代码 (只需创建 Agent)")
+	t.Log("Agent 将所有的 Graph 结构'压缩'到了内部实现中！")
+}
+
+// getAgentFinalResult 从 Agent 的事件流中获取最终结果
+func getAgentFinalResult(t *testing.T, iter *adk.AsyncIterator[*adk.AgentEvent]) string {
+	var finalResult string
+
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+
+		if event.Err != nil {
+			t.Fatalf("Agent error: %v", event.Err)
+		}
+
+		// 记录 Agent 的执行过程
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			msgVariant := event.Output.MessageOutput
+			msg, err := msgVariant.GetMessage()
+			if err != nil {
+				t.Fatalf("Failed to get message: %v", err)
+			}
+
+			if msg.Role == schema.Assistant {
+				finalResult = msg.Content
+				t.Logf("[Agent Event] Assistant message: %s", msg.Content)
+			} else if msg.Role == schema.Tool {
+				t.Logf("[Agent Event] Tool result: %s", msg.Content)
+			}
+		}
+
+		if event.Action != nil {
+			if event.Action.Exit {
+				t.Log("[Agent Event] Agent decided to exit")
+			}
+		}
+	}
+
+	return finalResult
+}
+
+// TestThrowDiceWithTool 测试使用掷骰子工具（符合 eino 图编排设计）
 func TestThrowDiceWithTool(t *testing.T) {
 	ctx := context.Background()
 
@@ -546,85 +675,151 @@ func TestThrowDiceWithTool(t *testing.T) {
 		t.Fatalf("Failed to create tools node: %v", err)
 	}
 
-	// ===== 测试1：要求掷骰子 =====
-	t.Log("\n===== Test 1: Ask to throw a dice =====")
+	// 定义状态类型：用于管理消息历史（完整的 ReAct Agent 模式）
+	type AgentState struct {
+		Messages []*schema.Message
+	}
 
-	messages := []*schema.Message{
+	// 创建带状态的 Graph，ToolsNode 只和 ChatModel 连接，由 ChatModel 决定何时结束
+	graph := compose.NewGraph[[]*schema.Message, *schema.Message](
+		compose.WithGenLocalState(func(ctx context.Context) *AgentState {
+			return &AgentState{Messages: []*schema.Message{}}
+		}),
+	)
+
+	// ChatModel 的状态处理器：管理消息历史
+	modelStatePreHandler := func(ctx context.Context, input []*schema.Message, state *AgentState) ([]*schema.Message, error) {
+		// 首次调用时，将输入消息保存到状态
+		if len(state.Messages) == 0 {
+			state.Messages = input
+		}
+		t.Logf("ChatModel input: %d messages in state", len(state.Messages))
+		return state.Messages, nil
+	}
+
+	modelStatePostHandler := func(ctx context.Context, output *schema.Message, state *AgentState) (*schema.Message, error) {
+		// 将模型输出追加到状态
+		state.Messages = append(state.Messages, output)
+		t.Logf("ChatModel output: %d tool calls", len(output.ToolCalls))
+		return output, nil
+	}
+
+	// 添加 ChatModel 节点（带状态处理）
+	err = graph.AddChatModelNode("chat_model", chatModel,
+		compose.WithStatePreHandler(modelStatePreHandler),
+		compose.WithStatePostHandler(modelStatePostHandler),
+	)
+	if err != nil {
+		t.Fatalf("Failed to add chat model node: %v", err)
+	}
+
+	// ToolsNode 的状态处理器：将工具结果追加到消息历史
+	toolsStatePreHandler := func(ctx context.Context, input *schema.Message, state *AgentState) (*schema.Message, error) {
+		// 将包含 ToolCalls 的助手消息追加到状态（如果还没有的话）
+		// 通常在 ChatModel 的 post handler 已经追加了，这里检查一下
+		if len(state.Messages) == 0 || state.Messages[len(state.Messages)-1] != input {
+			state.Messages = append(state.Messages, input)
+		}
+		return input, nil
+	}
+
+	toolsStatePostHandler := func(ctx context.Context, toolMessages []*schema.Message, state *AgentState) ([]*schema.Message, error) {
+		// 将工具执行结果追加到状态
+		state.Messages = append(state.Messages, toolMessages...)
+		t.Logf("ToolsNode executed: Added %d tool messages to state", len(toolMessages))
+		return toolMessages, nil
+	}
+
+	// 添加 ToolsNode 节点（带状态处理）
+	err = graph.AddToolsNode("tools_executor", toolsNode,
+		compose.WithStatePreHandler(toolsStatePreHandler),
+		compose.WithStatePostHandler(toolsStatePostHandler),
+	)
+	if err != nil {
+		t.Fatalf("Failed to add tools node: %v", err)
+	}
+
+	// ChatModel 后的分支：判断是否需要调用工具
+	modelBranchCondition := func(ctx context.Context, msg *schema.Message) (map[string]bool, error) {
+		if len(msg.ToolCalls) > 0 {
+			t.Logf("Branch from ChatModel: Detected %d tool calls, routing to tools_executor", len(msg.ToolCalls))
+			return map[string]bool{"tools_executor": true}, nil
+		}
+		t.Log("Branch from ChatModel: No tool calls, routing to END")
+		return map[string]bool{compose.END: true}, nil
+	}
+
+	modelBranch := compose.NewGraphMultiBranch(modelBranchCondition, map[string]bool{
+		"tools_executor": true,
+		compose.END:      true,
+	})
+
+	// 构建图的边：START → chat_model → branch → [tools_executor → chat_model | END]
+	//                                        ↑_______________|
+	// 这形成了一个循环：chat_model → tools_executor → chat_model → ...
+	err = graph.AddEdge(compose.START, "chat_model")
+	if err != nil {
+		t.Fatalf("Failed to add START edge: %v", err)
+	}
+
+	err = graph.AddBranch("chat_model", modelBranch)
+	if err != nil {
+		t.Fatalf("Failed to add branch from chat_model: %v", err)
+	}
+
+	// ToolsNode 执行后回到 ChatModel（形成 ReAct 循环）
+	// 类型匹配：ToolsNode 输出 []*schema.Message，ChatModel 输入 []*schema.Message
+	err = graph.AddEdge("tools_executor", "chat_model")
+	if err != nil {
+		t.Fatalf("Failed to add edge from tools to chat_model: %v", err)
+	}
+
+	// 编译图
+	compiledGraph, err := graph.Compile(ctx)
+	if err != nil {
+		t.Fatalf("Failed to compile graph: %v", err)
+	}
+
+	// ===== 测试1：要求掷骰子 =====
+	t.Log("\n===== Test 1: Ask to throw a dice (using Graph) =====")
+
+	messages1 := []*schema.Message{
 		schema.UserMessage("Please throw a dice for me and tell me the result!"),
 	}
 
-	// 第一次调用模型
-	result, err := chatModel.Generate(ctx, messages)
+	result1, err := compiledGraph.Invoke(ctx, messages1)
 	if err != nil {
-		t.Fatalf("Failed to generate response: %v", err)
+		t.Fatalf("Failed to invoke graph: %v", err)
 	}
 
-	t.Logf("User: %s", messages[0].Content)
-	t.Logf("Assistant (first response): %v tool calls", len(result.ToolCalls))
-
-	// 如果有工具调用，执行工具
-	if len(result.ToolCalls) > 0 {
-		// 将助手的消息（包含工具调用）添加到历史
-		messages = append(messages, result)
-
-		// 执行工具
-		toolMessages, err := toolsNode.Invoke(ctx, result)
-		if err != nil {
-			t.Fatalf("Failed to execute tools: %v", err)
-		}
-
-		// 将工具结果添加到历史
-		messages = append(messages, toolMessages...)
-
-		t.Logf("Tool executed, got %d tool messages", len(toolMessages))
-
-		// 再次调用模型，让它基于工具结果生成最终回复
-		finalResult, err := chatModel.Generate(ctx, messages)
-		if err != nil {
-			t.Fatalf("Failed to generate final response: %v", err)
-		}
-
-		t.Logf("Assistant (final): %s", finalResult.Content)
-	} else {
-		t.Logf("Assistant (no tool call): %s", result.Content)
-	}
+	t.Logf("User: %s", messages1[0].Content)
+	t.Logf("Graph result: %+v", result1)
 
 	// ===== 测试2：掷多个骰子 =====
-	t.Log("\n===== Test 2: Throw multiple dice =====")
+	t.Log("\n===== Test 2: Throw multiple dice (using Graph) =====")
 
 	messages2 := []*schema.Message{
 		schema.UserMessage("Throw 3 dice with 20 sides each (like D&D dice) and tell me the total!"),
 	}
 
-	result2, err := chatModel.Generate(ctx, messages2)
+	result2, err := compiledGraph.Invoke(ctx, messages2)
 	if err != nil {
-		t.Fatalf("Failed to generate response: %v", err)
+		t.Fatalf("Failed to invoke graph: %v", err)
 	}
 
-	if len(result2.ToolCalls) > 0 {
-		messages2 = append(messages2, result2)
-		toolMessages2, _ := toolsNode.Invoke(ctx, result2)
-		messages2 = append(messages2, toolMessages2...)
-
-		finalResult2, err := chatModel.Generate(ctx, messages2)
-		if err != nil {
-			t.Fatalf("Failed to generate final response: %v", err)
-		}
-
-		t.Logf("User: %s", messages2[0].Content)
-		t.Logf("Assistant: %s", finalResult2.Content)
-	}
+	t.Logf("User: %s", messages2[0].Content)
+	t.Logf("Graph result: %+v", result2)
 
 	// ===== 测试3：普通对话（不使用工具） =====
-	t.Log("\n===== Test 3: Normal conversation without tool =====")
+	t.Log("\n===== Test 3: Normal conversation without tool (using Graph) =====")
 
 	messages3 := []*schema.Message{
 		schema.UserMessage("What is the capital of France?"),
 	}
 
-	result3, err := chatModel.Generate(ctx, messages3)
+	result3, err := compiledGraph.Invoke(ctx, messages3)
 	if err != nil {
-		t.Fatalf("Failed to generate response: %v", err)
+		t.Fatalf("Failed to invoke graph: %v", err)
 	}
 
 	t.Logf("User: %s", messages3[0].Content)
