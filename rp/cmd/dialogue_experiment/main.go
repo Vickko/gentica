@@ -4,14 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 
+	"github.com/cloudwego/eino-ext/devops"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 
 	"gentica1/rp"
+)
+
+const (
+	DevOpsServerPort = 52539
+	ProxyPort        = 52538
 )
 
 // SidecarSystemPromptTemplate 定义 Sidecar 的系统提示词模板
@@ -39,6 +49,50 @@ const SidecarSystemPromptTemplate = `你是 %s 的专属 DM (Dungeon Master) / �
 ---
 `
 
+// DialogueState 对话状态
+type DialogueState struct {
+	CurrentRound int
+	MaxRounds    int
+	Records      []DialogueRecord
+}
+
+// AgentContext 封装 Agent 的上下文信息
+type AgentContext struct {
+	Name             string
+	CharacterSetting string
+	SystemPrompt     string
+	SidecarModel     model.ToolCallingChatModel
+	Agent            *adk.ChatModelAgent
+	MessageHistory   []*schema.Message
+}
+
+// DialogueRecord 对话记录
+type DialogueRecord struct {
+	Round              int
+	Speaker            string
+	RawMessage         string
+	Listener           string
+	ListenerPerception string
+	ListenerResponse   string
+}
+
+// DialogueInput 对话输入
+type DialogueInput struct {
+	InitialMessage string
+}
+
+// DialogueOutput 对话输出
+type DialogueOutput struct {
+	Records []DialogueRecord
+}
+
+// TurnData 单轮对话中传递的数据
+type TurnData struct {
+	RawMessage string // 原始发言
+	Speaker    string // 发言者名称
+	Perception string // 感知内容 (Sidecar 生成后填充)
+}
+
 // loadMarkdownFile 读取 Markdown 文件内容
 func loadMarkdownFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
@@ -48,34 +102,10 @@ func loadMarkdownFile(path string) (string, error) {
 	return string(data), nil
 }
 
-// AgentContext 封装 Agent 的上下文信息
-type AgentContext struct {
-	Name             string
-	CharacterSetting string
-	SystemPrompt     string
-	Model            model.ToolCallingChatModel
-	Agent            *adk.ChatModelAgent
-	MessageHistory   []*schema.Message
-}
-
-// DialogueRecord 对话记录
-type DialogueRecord struct {
-	Round              int    // 第几轮
-	Speaker            string // 本轮发言者
-	RawMessage         string // 发言者的原始消息
-	Listener           string // 本轮接收者
-	ListenerPerception string // 接收者对发言的感知
-	ListenerResponse   string // 接收者的回复
-}
-
-// runSidecar 执行 Sidecar Agent 生成感知
-func runSidecar(ctx context.Context, listener *AgentContext, speakerName string, rawContent string) (string, error) {
-	// 1. 构建历史记录字符串
-	// Listener 的 UserMessage (Perception) -> Sidecar 之前的叙述
-	// Listener 的 AssistantMessage (Response) -> Sidecar 观察到的宿主反应
+// buildSidecarPrompt 构建 Sidecar 的系统提示词
+func buildSidecarPrompt(listener *AgentContext) string {
 	var historyBuilder strings.Builder
 
-	// 仅保留最近的 8 对记录（16条消息）
 	startIndex := 0
 	if len(listener.MessageHistory) > 16 {
 		startIndex = len(listener.MessageHistory) - 16
@@ -95,15 +125,20 @@ func runSidecar(ctx context.Context, listener *AgentContext, speakerName string,
 		historyStr = "(暂无历史)"
 	}
 
-	// 2. 构建 Sidecar 的系统提示词
-	systemPrompt := fmt.Sprintf(SidecarSystemPromptTemplate,
+	return fmt.Sprintf(SidecarSystemPromptTemplate,
 		listener.Name, listener.Name, listener.Name,
 		listener.CharacterSetting,
 		listener.Name,
 		historyStr,
 	)
+}
 
-	// 3. 构建当前的输入消息 (User Message)
+// runSidecar 执行 Sidecar 逻辑
+func runSidecar(ctx context.Context, agent *AgentContext, input *TurnData) (*TurnData, error) {
+	log.Printf("[%s Sidecar] 正在为 %s 生成感知...", agent.Name, agent.Name)
+	log.Printf("[%s Sidecar] 输入: %s 说: %s", agent.Name, input.Speaker, input.RawMessage)
+
+	systemPrompt := buildSidecarPrompt(agent)
 	currentSituation := fmt.Sprintf(`
 [当前情景]
 对方角色： %s
@@ -111,26 +146,35 @@ func runSidecar(ctx context.Context, listener *AgentContext, speakerName string,
 %s
 
 请作为 DM，向 %s 描述此刻的所见所闻（使用第二人称"你"）：`,
-		speakerName, rawContent, listener.Name)
+		input.Speaker, input.RawMessage, agent.Name)
 
-	// 组合所有消息 (注意：历史已经作为 System Prompt 的一部分注入了，所以这里不需要再 append history)
 	messages := []*schema.Message{
 		schema.SystemMessage(systemPrompt),
 		schema.UserMessage(currentSituation),
 	}
 
-	// 4. 调用模型生成
-	out, err := listener.Model.Generate(ctx, messages)
+	out, err := agent.SidecarModel.Generate(ctx, messages)
 	if err != nil {
-		return "", fmt.Errorf("sidecar 生成失败: %w", err)
+		perception := fmt.Sprintf("我听见 %s 说了些什么，但没听清。", input.Speaker)
+		log.Printf("[%s Sidecar] Error: %v, 使用默认感知", agent.Name, err)
+		input.Perception = perception
+	} else {
+		input.Perception = strings.TrimSpace(out.Content)
 	}
 
-	content := strings.TrimSpace(out.Content)
-	return content, nil
+	log.Printf("[%s Sidecar] 感知结果:\n%s", agent.Name, input.Perception)
+
+	// 将感知存入历史
+	formattedPerception := fmt.Sprintf("> **Perception:**\n%s", input.Perception)
+	agent.MessageHistory = append(agent.MessageHistory, schema.UserMessage(formattedPerception))
+
+	return input, nil
 }
 
-// runAgent 执行 Character Agent 生成回复
-func runAgent(ctx context.Context, agent *AgentContext) (string, error) {
+// runAgent 执行 Agent 逻辑
+func runAgent(ctx context.Context, agent *AgentContext) (*TurnData, error) {
+	log.Printf("[%s Agent] 正在生成回复...", agent.Name)
+
 	agentInput := &adk.AgentInput{
 		Messages: agent.MessageHistory,
 	}
@@ -144,7 +188,7 @@ func runAgent(ctx context.Context, agent *AgentContext) (string, error) {
 			break
 		}
 		if event.Err != nil {
-			return "", fmt.Errorf("agent 运行错误: %w", event.Err)
+			return nil, fmt.Errorf("[%s Agent] 运行错误: %w", agent.Name, event.Err)
 		}
 		if event.Output != nil && event.Output.MessageOutput != nil {
 			msg, err := event.Output.MessageOutput.GetMessage()
@@ -158,25 +202,191 @@ func runAgent(ctx context.Context, agent *AgentContext) (string, error) {
 	}
 
 	if assistantMessage == nil {
-		return "", fmt.Errorf("agent 未生成有效消息")
+		return nil, fmt.Errorf("[%s Agent] 未生成有效消息", agent.Name)
 	}
 
-	// 将回复加入历史
 	agent.MessageHistory = append(agent.MessageHistory, assistantMessage)
-	return assistantMessage.Content, nil
+	log.Printf("[%s Agent] 回复:\n%s", agent.Name, assistantMessage.Content)
+
+	return &TurnData{
+		RawMessage: assistantMessage.Content,
+		Speaker:    agent.Name,
+	}, nil
+}
+
+// createDialogueGraph 创建对话实验的 Graph
+// 流程: Carlotta发言 → Zani Sidecar → Zani Agent → Carlotta Sidecar → Carlotta Agent → 循环...
+func createDialogueGraph(ctx context.Context, carlotta, zani *AgentContext, maxRounds int) (compose.Runnable[*DialogueInput, *DialogueOutput], error) {
+	g := compose.NewGraph[*DialogueInput, *DialogueOutput](
+		compose.WithGenLocalState(func(ctx context.Context) *DialogueState {
+			return &DialogueState{
+				CurrentRound: 0,
+				MaxRounds:    maxRounds,
+				Records:      []DialogueRecord{},
+			}
+		}),
+	)
+
+	// ===== 节点定义 =====
+
+	// 初始化节点
+	initNode := compose.InvokableLambda(func(ctx context.Context, input *DialogueInput) (*TurnData, error) {
+		log.Printf("=== 开始对话实验 ===")
+		log.Printf("[初始化] Carlotta 开场: %s", input.InitialMessage)
+		return &TurnData{
+			RawMessage: input.InitialMessage,
+			Speaker:    carlotta.Name,
+		}, nil
+	})
+
+	// Zani Sidecar 节点
+	zaniSidecarNode := compose.InvokableLambda(func(ctx context.Context, input *TurnData) (*TurnData, error) {
+		return runSidecar(ctx, zani, input)
+	})
+
+	// Zani Agent 节点
+	zaniAgentNode := compose.InvokableLambda(func(ctx context.Context, input *TurnData) (*TurnData, error) {
+		return runAgent(ctx, zani)
+	})
+
+	// Zani Agent 的 pre/post handler
+	zaniAgentPreHandler := func(ctx context.Context, input *TurnData, state *DialogueState) (*TurnData, error) {
+		state.CurrentRound++
+		log.Printf("\n--- 第 %d 轮 (Zani 回应) ---", state.CurrentRound)
+		return input, nil
+	}
+	zaniAgentPostHandler := func(ctx context.Context, output *TurnData, state *DialogueState) (*TurnData, error) {
+		var perception string
+		for i := len(zani.MessageHistory) - 2; i >= 0; i-- {
+			if zani.MessageHistory[i].Role == schema.User {
+				perception = strings.TrimPrefix(zani.MessageHistory[i].Content, "> **Perception:**\n")
+				break
+			}
+		}
+		state.Records = append(state.Records, DialogueRecord{
+			Round:              state.CurrentRound,
+			Speaker:            carlotta.Name,
+			RawMessage:         "",
+			Listener:           zani.Name,
+			ListenerPerception: perception,
+			ListenerResponse:   output.RawMessage,
+		})
+		return output, nil
+	}
+
+	// Carlotta Sidecar 节点
+	carlottaSidecarNode := compose.InvokableLambda(func(ctx context.Context, input *TurnData) (*TurnData, error) {
+		return runSidecar(ctx, carlotta, input)
+	})
+
+	// Carlotta Agent 节点
+	carlottaAgentNode := compose.InvokableLambda(func(ctx context.Context, input *TurnData) (*TurnData, error) {
+		return runAgent(ctx, carlotta)
+	})
+
+	// Carlotta Agent 的 pre/post handler
+	carlottaAgentPreHandler := func(ctx context.Context, input *TurnData, state *DialogueState) (*TurnData, error) {
+		state.CurrentRound++
+		log.Printf("\n--- 第 %d 轮 (Carlotta 回应) ---", state.CurrentRound)
+		return input, nil
+	}
+	carlottaAgentPostHandler := func(ctx context.Context, output *TurnData, state *DialogueState) (*TurnData, error) {
+		var perception string
+		for i := len(carlotta.MessageHistory) - 2; i >= 0; i-- {
+			if carlotta.MessageHistory[i].Role == schema.User {
+				perception = strings.TrimPrefix(carlotta.MessageHistory[i].Content, "> **Perception:**\n")
+				break
+			}
+		}
+		state.Records = append(state.Records, DialogueRecord{
+			Round:              state.CurrentRound,
+			Speaker:            zani.Name,
+			RawMessage:         "",
+			Listener:           carlotta.Name,
+			ListenerPerception: perception,
+			ListenerResponse:   output.RawMessage,
+		})
+		return output, nil
+	}
+
+	// 输出节点
+	outputNode := compose.InvokableLambda(func(ctx context.Context, _ *TurnData) (*DialogueOutput, error) {
+		var output *DialogueOutput
+		err := compose.ProcessState[*DialogueState](ctx, func(ctx context.Context, state *DialogueState) error {
+			log.Printf("=== 对话实验结束，共 %d 轮 ===", state.CurrentRound)
+			output = &DialogueOutput{Records: state.Records}
+			saveRecords(state.Records)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return output, nil
+	})
+
+	// ===== 添加节点 =====
+	_ = g.AddLambdaNode("init", initNode, compose.WithNodeName("初始化"))
+
+	_ = g.AddLambdaNode("zani_sidecar", zaniSidecarNode, compose.WithNodeName("Zani-Sidecar"))
+	_ = g.AddLambdaNode("zani_agent", zaniAgentNode,
+		compose.WithStatePreHandler[*TurnData, *DialogueState](zaniAgentPreHandler),
+		compose.WithStatePostHandler[*TurnData, *DialogueState](zaniAgentPostHandler),
+		compose.WithNodeName("Zani-Agent"))
+
+	_ = g.AddLambdaNode("carlotta_sidecar", carlottaSidecarNode, compose.WithNodeName("Carlotta-Sidecar"))
+	_ = g.AddLambdaNode("carlotta_agent", carlottaAgentNode,
+		compose.WithStatePreHandler[*TurnData, *DialogueState](carlottaAgentPreHandler),
+		compose.WithStatePostHandler[*TurnData, *DialogueState](carlottaAgentPostHandler),
+		compose.WithNodeName("Carlotta-Agent"))
+
+	_ = g.AddLambdaNode("output", outputNode, compose.WithNodeName("输出结果"))
+
+	// ===== 添加边 =====
+	_ = g.AddEdge(compose.START, "init")
+	_ = g.AddEdge("init", "zani_sidecar")
+	_ = g.AddEdge("zani_sidecar", "zani_agent")
+	_ = g.AddEdge("zani_agent", "carlotta_sidecar")
+	_ = g.AddEdge("carlotta_sidecar", "carlotta_agent")
+
+	// 分支: carlotta_agent 之后判断是否继续
+	_ = g.AddBranch("carlotta_agent", compose.NewGraphBranch(
+		func(ctx context.Context, output *TurnData) (string, error) {
+			var next string
+			err := compose.ProcessState[*DialogueState](ctx, func(ctx context.Context, state *DialogueState) error {
+				if state.CurrentRound >= state.MaxRounds {
+					log.Printf("已达到最大轮次 %d，结束对话", state.MaxRounds)
+					next = "output"
+				} else {
+					next = "zani_sidecar"
+				}
+				return nil
+			})
+			if err != nil {
+				return "", err
+			}
+			return next, nil
+		},
+		map[string]bool{"zani_sidecar": true, "output": true},
+	))
+
+	_ = g.AddEdge("output", compose.END)
+
+	return g.Compile(ctx, compose.WithGraphName("dialogue_experiment"))
 }
 
 func main() {
+	ctx := context.Background()
+
+	// 初始化 DevOps server
+	log.Println("正在初始化 DevOps server...")
+	err := devops.Init(ctx, devops.WithDevServerPort(fmt.Sprintf("%d", DevOpsServerPort)))
+	if err != nil {
+		log.Fatalf("Failed to initialize DevOps server: %v", err)
+	}
+
 	// API 配置
-	// 注意：如果使用原生 Gemini/Claude 接口，需要提供对应的 API Key，且 BaseURL 可能需要调整或留空。
 	apiKey := "sk-6kgtZQDkmZDQMfCo28C360320cEf45FaAf1577Ef08F4032b"
 	baseURL := "https://aihubmix.com/v1"
-
-	// modelName 可选值示例:
-	// - "Kimi-K2-0905" (OpenAI 兼容)
-	// - "gemini-1.5-pro" (使用原生 Gemini 接口，支持自定义 BaseURL)
-	// - "claude-3-5-sonnet" (使用原生 Claude 接口，支持自定义 BaseURL)
-	// - "deepseek-chat" (使用 DeepSeek client)
 	agentModelName := "DeepSeek-V3.2-Exp"
 	sidecarModelName := "grok-4-fast-non-reasoning"
 
@@ -186,13 +396,17 @@ func main() {
 	zaniInnerWorldPath := "docs/wutheringwaves/character-inner-world-zani.md"
 	carlottaInnerWorldPath := "docs/wutheringwaves/character-inner-world-carlotta.md"
 
-	ctx := context.Background()
-
-	// 1. 加载配置
-	fmt.Println("正在加载配置...")
-	zaniConfig, _ := rp.LoadRoleConfig(zaniConfigPath)
+	// 加载配置
+	log.Println("正在加载配置...")
+	zaniConfig, err := rp.LoadRoleConfig(zaniConfigPath)
+	if err != nil {
+		log.Fatalf("加载 Zani 配置失败: %v", err)
+	}
 	zaniInnerWorld, _ := loadMarkdownFile(zaniInnerWorldPath)
-	carlottaConfig, _ := rp.LoadRoleConfig(carlottaConfigPath)
+	carlottaConfig, err := rp.LoadRoleConfig(carlottaConfigPath)
+	if err != nil {
+		log.Fatalf("加载 Carlotta 配置失败: %v", err)
+	}
 	carlottaInnerWorld, _ := loadMarkdownFile(carlottaInnerWorldPath)
 
 	// 构建 Prompt
@@ -202,15 +416,8 @@ func main() {
 	carlottaFullSystemPrompt := carlottaConfig.CharacterSetting + "\n\n---\n\n# 当前时刻的内心世界状态\n\n" + carlottaInnerWorld + "\n\n" + carlottaConfig.RoleInstruction
 	carlottaSidecarSetting := carlottaConfig.CharacterSetting + "\n\n---\n\n# 当前时刻的内心世界状态\n\n" + carlottaInnerWorld
 
-	// 2. 创建模型和 Agent
-	fmt.Println("正在初始化 Agent...")
-
-	// Zani
-	zaniAgentModel, _ := rp.CreateChatModel(ctx, &rp.ModelClientConfig{Model: agentModelName, APIKey: apiKey, BaseURL: baseURL})
-	zaniSidecarModel, _ := rp.CreateChatModel(ctx, &rp.ModelClientConfig{Model: sidecarModelName, APIKey: apiKey, BaseURL: baseURL})
-	zaniAgent, _ := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name: zaniConfig.Name, Description: zaniConfig.Name, Instruction: zaniFullSystemPrompt, Model: zaniAgentModel, MaxIterations: 10,
-	})
+	// 创建模型和 Agent
+	log.Println("正在初始化 Agent...")
 
 	// Carlotta
 	carlottaAgentModel, _ := rp.CreateChatModel(ctx, &rp.ModelClientConfig{Model: agentModelName, APIKey: apiKey, BaseURL: baseURL})
@@ -218,76 +425,72 @@ func main() {
 	carlottaAgent, _ := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name: carlottaConfig.Name, Description: carlottaConfig.Name, Instruction: carlottaFullSystemPrompt, Model: carlottaAgentModel, MaxIterations: 10,
 	})
-
-	// 上下文
-	zaniCtx := &AgentContext{
-		Name: zaniConfig.Name, CharacterSetting: zaniSidecarSetting, SystemPrompt: zaniFullSystemPrompt,
-		Model: zaniSidecarModel, Agent: zaniAgent, MessageHistory: []*schema.Message{},
-	}
 	carlottaCtx := &AgentContext{
-		Name: carlottaConfig.Name, CharacterSetting: carlottaSidecarSetting, SystemPrompt: carlottaFullSystemPrompt,
-		Model: carlottaSidecarModel, Agent: carlottaAgent, MessageHistory: []*schema.Message{},
+		Name:             carlottaConfig.Name,
+		CharacterSetting: carlottaSidecarSetting,
+		SystemPrompt:     carlottaFullSystemPrompt,
+		SidecarModel:     carlottaSidecarModel,
+		Agent:            carlottaAgent,
+		MessageHistory:   []*schema.Message{},
 	}
 
-	// 3. 对话循环
-	fmt.Println("\n=== 开始对话实验 ===")
-	dialogueRecords := []DialogueRecord{}
-	const maxRounds = 8
-
-	currentSpeaker := carlottaCtx
-	currentListener := zaniCtx
-
-	// 初始开场白
-	initialPrompt := "（推门而入，语气比平时更严肃，但保持优雅）晚上好，赞妮。看起来你正准备下班？"
-	lastRawMessage := initialPrompt
-
-	fmt.Printf("[Speaker] %s: %s\n", currentSpeaker.Name, lastRawMessage)
-
-	for round := 1; round <= maxRounds; round++ {
-		fmt.Printf("\n--- 第 %d 轮 ---\n", round)
-
-		// 1. Listener 感知 (Sidecar)
-		fmt.Printf("正在生成 %s 的感知...\n", currentListener.Name)
-		perception, err := runSidecar(ctx, currentListener, currentSpeaker.Name, lastRawMessage)
-		if err != nil {
-			log.Printf("Sidecar Error: %v", err)
-			perception = fmt.Sprintf("我听见 %s 说了些什么，但没听清。", currentSpeaker.Name)
-		}
-		fmt.Printf("[Sidecar] %s 感知:\n%s\n", currentListener.Name, perception)
-
-		// 将感知存入 Listener 历史
-		// 关键修正：必须确保 Listener 知道这是感知到的对方发言
-		formattedPerception := fmt.Sprintf("> **Perception:**\n%s", perception)
-		currentListener.MessageHistory = append(currentListener.MessageHistory, schema.UserMessage(formattedPerception))
-
-		// 2. Listener 回复 (Agent)
-		fmt.Printf("正在生成 %s 的回复...\n", currentListener.Name)
-		response, err := runAgent(ctx, currentListener)
-		if err != nil {
-			log.Printf("Agent Error: %v", err)
-			break
-		}
-		fmt.Printf("[Agent] %s 回复:\n%s\n", currentListener.Name, response)
-
-		// 记录这一轮
-		dialogueRecords = append(dialogueRecords, DialogueRecord{
-			Round:              round,
-			Speaker:            currentSpeaker.Name,
-			RawMessage:         lastRawMessage,
-			Listener:           currentListener.Name,
-			ListenerPerception: perception,
-			ListenerResponse:   response,
-		})
-
-		// 准备下一轮
-		lastRawMessage = response // Listener 的回复成为下一轮的 Raw Message
-
-		// 交换角色
-		currentSpeaker, currentListener = currentListener, currentSpeaker
+	// Zani
+	zaniAgentModel, _ := rp.CreateChatModel(ctx, &rp.ModelClientConfig{Model: agentModelName, APIKey: apiKey, BaseURL: baseURL})
+	zaniSidecarModel, _ := rp.CreateChatModel(ctx, &rp.ModelClientConfig{Model: sidecarModelName, APIKey: apiKey, BaseURL: baseURL})
+	zaniAgent, _ := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name: zaniConfig.Name, Description: zaniConfig.Name, Instruction: zaniFullSystemPrompt, Model: zaniAgentModel, MaxIterations: 10,
+	})
+	zaniCtx := &AgentContext{
+		Name:             zaniConfig.Name,
+		CharacterSetting: zaniSidecarSetting,
+		SystemPrompt:     zaniFullSystemPrompt,
+		SidecarModel:     zaniSidecarModel,
+		Agent:            zaniAgent,
+		MessageHistory:   []*schema.Message{},
 	}
 
-	// 4. 保存记录
-	saveRecords(dialogueRecords)
+	// 创建对话 Graph (不自动运行，由 debugger start 触发)
+	_, err = createDialogueGraph(ctx, carlottaCtx, zaniCtx, 8)
+	if err != nil {
+		log.Fatalf("Failed to create dialogue graph: %v", err)
+	}
+
+	// 启动代理服务器 (解决 CORS 问题)
+	target, _ := url.Parse(fmt.Sprintf("http://localhost:%d", DevOpsServerPort))
+	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Set("Access-Control-Allow-Origin", "*")
+		resp.Header.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+		resp.Header.Set("Access-Control-Allow-Headers", "*")
+		resp.Header.Set("Access-Control-Expose-Headers", "*")
+		return nil
+	}
+
+	proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.Header().Set("Access-Control-Expose-Headers", "*")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+
+	log.Printf("✓ DevOps server started on port %d", DevOpsServerPort)
+	log.Printf("✓ Proxy server starting on port %d", ProxyPort)
+	log.Printf("✓ CORS enabled for all origins")
+	log.Printf("✓ Graph 'dialogue_experiment' registered")
+	log.Printf("\n访问 DevOps debugger: http://localhost:%d", ProxyPort)
+	log.Printf("使用 debugger 的 Start 按钮启动对话流程")
+	log.Printf("\n输入示例: {\"InitialMessage\": \"（推门而入，语气比平时更严肃，但保持优雅）晚上好，赞妮。看起来你正准备下班？\"}")
+
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", ProxyPort), proxyHandler); err != nil {
+		log.Fatalf("Proxy server failed: %v", err)
+	}
 }
 
 func saveRecords(records []DialogueRecord) {
@@ -306,6 +509,6 @@ func saveRecords(records []DialogueRecord) {
 	if err := os.WriteFile(outputFile, []byte(output.String()), 0644); err != nil {
 		log.Println("保存失败:", err)
 	} else {
-		fmt.Println("\n记录已保存到", outputFile)
+		log.Println("\n记录已保存到", outputFile)
 	}
 }
